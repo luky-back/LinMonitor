@@ -1,13 +1,37 @@
 import { Device, User, InviteCode, Mail, UpdateConfig } from '../types';
 
-// Default to 127.0.0.1 to avoid localhost ipv6 resolution issues
-let API_BASE = 'http://127.0.0.1:3000/api';
+const STORAGE_KEY = 'pimonitor_api_url';
+
+// Helper to determine initial URL
+const getInitialBaseUrl = () => {
+  // 1. Check local storage (persistence across refreshes)
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored) return stored;
+  
+  // 2. Check if running in Vite dev mode (standard port 5173)
+  if (window.location.port === '5173') {
+    return 'http://127.0.0.1:3000/api';
+  }
+  
+  // 3. Default to relative path (assumes "all-in-one" serving by backend)
+  return '/api';
+};
+
+let API_BASE = getInitialBaseUrl();
 
 export const api = {
   setBaseUrl(url: string) {
     // Standardize URL: remove trailing slash, ensure protocol
     let cleanUrl = url.trim().replace(/\/$/, '');
     
+    // If user enters just a path like "/api" or empty, handle it
+    if (cleanUrl === '' || cleanUrl.startsWith('/')) {
+        API_BASE = cleanUrl || '/api';
+        if (!API_BASE.endsWith('/api')) API_BASE += '/api';
+        localStorage.setItem(STORAGE_KEY, API_BASE);
+        return;
+    }
+
     if (!cleanUrl.startsWith('http')) {
         cleanUrl = `http://${cleanUrl}`;
     }
@@ -18,6 +42,9 @@ export const api = {
     } else {
        API_BASE = cleanUrl;
     }
+    
+    // Persist to storage
+    localStorage.setItem(STORAGE_KEY, API_BASE);
   },
 
   getBaseUrl() {
