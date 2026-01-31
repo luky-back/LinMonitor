@@ -6,7 +6,7 @@ import { Shield, Key, UserPlus, Server, Check, ArrowRight } from 'lucide-react';
 interface AuthProps {
   mode: 'login' | 'register' | 'setup';
   language: string;
-  onLogin: (username: string) => void;
+  onLogin: (username: string, password?: string) => void;
   onRegister: (code: string, username: string, password: string) => void;
   onSetup: (username: string, password: string) => void;
   onSwitchMode: (mode: 'login' | 'register') => void;
@@ -48,7 +48,7 @@ const Auth: React.FC<AuthProps> = ({ mode, language, onLogin, onRegister, onSetu
        // Here we wrap the parent call to intercept.
        const performAction = () => {
          if (renderMode === 'login') {
-            onLogin(username);
+            onLogin(username, password);
          } else if (renderMode === 'setup') {
             onSetup(username, password);
          } else {
