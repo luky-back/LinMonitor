@@ -1,3 +1,4 @@
+
 export interface PM2Process {
   pid: number;
   name: string;
@@ -51,6 +52,7 @@ export interface HardwareSpecs {
     size: string;
     type: string;
     interface: string;
+    usage?: number; // Added usage percentage
   }>;
 }
 
