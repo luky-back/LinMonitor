@@ -478,11 +478,11 @@ def serve_index():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>PiMonitor Server</title>
         <style>
-            body { background: #0f172a; color: #e2e8f0; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-            .card { background: #1e293b; padding: 2rem; border-radius: 1rem; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); max-width: 500px; text-align: center; border: 1px solid #334155; }
-            code { background: #0f172a; padding: 0.2rem 0.4rem; border-radius: 0.3rem; font-family: monospace; color: #38bdf8; }
-            h1 { margin-top: 0; color: #fff; }
-            .status { color: #10b981; font-weight: bold; margin-bottom: 1.5rem; }
+            body {{ background: #0f172a; color: #e2e8f0; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }}
+            .card {{ background: #1e293b; padding: 2rem; border-radius: 1rem; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); max-width: 500px; text-align: center; border: 1px solid #334155; }}
+            code {{ background: #0f172a; padding: 0.2rem 0.4rem; border-radius: 0.3rem; font-family: monospace; color: #38bdf8; }}
+            h1 {{ margin-top: 0; color: #fff; }}
+            .status {{ color: #10b981; font-weight: bold; margin-bottom: 1.5rem; }}
         </style>
     </head>
     <body>
@@ -545,7 +545,7 @@ if __name__ == '__main__':
 """
     
     filename = "pimonitor_server.py"
-    with open(filename, "w") as f:
+    with open(filename, "w", encoding="utf-8") as f:
         f.write(code)
     return filename
 
