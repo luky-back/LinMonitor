@@ -1,4 +1,4 @@
-import { Device, User, InviteCode, Mail, UpdateConfig } from '../types';
+import { Device, User, InviteCode, Mail, Notification, UpdateConfig } from '../types';
 
 const STORAGE_KEY = 'pimonitor_api_url';
 
@@ -135,6 +135,33 @@ export const api = {
 
   async deleteInvite(code: string): Promise<void> {
       await fetch(`${API_BASE}/invites/${code}`, { method: 'DELETE' });
+  },
+
+  // Mails & Notifications
+  async getMails(userId: string): Promise<Mail[]> {
+    const res = await fetch(`${API_BASE}/mail/${userId}`);
+    if (!res.ok) return [];
+    return await res.json();
+  },
+
+  async sendMail(fromId: string, toId: string, subject: string, body: string): Promise<Mail> {
+    const res = await fetch(`${API_BASE}/mail`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromId, toId, subject, body })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return await res.json();
+  },
+
+  async getNotifications(userId: string): Promise<Notification[]> {
+    const res = await fetch(`${API_BASE}/notifications/${userId}`);
+    if (!res.ok) return [];
+    return await res.json();
+  },
+
+  async markNotificationRead(id: string): Promise<void> {
+    await fetch(`${API_BASE}/notifications/${id}/read`, { method: 'PUT' });
   },
 
   // System
