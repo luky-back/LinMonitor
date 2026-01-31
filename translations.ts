@@ -1,3 +1,4 @@
+
 export const translations: Record<string, Record<string, string>> = {
   en: {
     overview: "Overview",
@@ -79,6 +80,7 @@ export const translations: Record<string, Record<string, string>> = {
     restart: "Restart",
     stop: "Stop",
     start: "Start",
+    reboot: "Reboot",
     copied: "Copied",
     confirmRemoveTitle: "Remove Device",
     confirmRemoveBody: "Are you sure you want to remove this device? This action cannot be undone.",
@@ -101,6 +103,8 @@ export const translations: Record<string, Record<string, string>> = {
     securityCheck: "Security Check",
     shutdownWarning: "You are about to shut down the main server. You will need physical access to turn it back on.",
     restartWarning: "You are about to restart the main server. All connections will be temporarily lost.",
+    deviceShutdownWarning: "You are about to shut down this device. SSH access will be lost until manually powered on.",
+    deviceRestartWarning: "You are about to reboot this device. It will go offline briefly.",
     typeText: "Type the text below to confirm:",
     verificationFailed: "Verification failed. Please try again.",
     verify: "Verify & Execute",
