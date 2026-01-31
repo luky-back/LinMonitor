@@ -190,5 +190,5 @@ export const translations: Record<string, Record<string, string>> = {
     notifications: "Benachrichtigungen",
     logout: "Abmelden"
   },
-  // ... other languages would follow similar update
+  // ... other languages would follow similar updates
 };
