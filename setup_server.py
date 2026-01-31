@@ -30,9 +30,13 @@ import uuid
 import socket
 import psutil
 import platform
-from flask import Flask, request, jsonify, send_from_directory
+import mimetypes
+from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 from datetime import datetime
+
+# Initialize mimetypes to ensure CSS/JS serve correctly on Windows
+mimetypes.init()
 
 # Configuration
 PORT = {port}
@@ -41,9 +45,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 INVITES_FILE = os.path.join(DATA_DIR, 'invites.json')
+DIST_DIR = os.path.join(BASE_DIR, 'dist')
 
 app = Flask(__name__, static_folder='dist', static_url_path='')
-# Enable CORS for all routes
+# Enable CORS for all routes to support development mode (separate UI/Backend ports)
 CORS(app, resources={{r"/*": {{"origins": "*"}}}})
 
 # In-memory stores
@@ -353,14 +358,51 @@ def execute_update():
 
 @app.route('/')
 def serve_index():
-    if os.path.exists('dist/index.html'):
-        return send_from_directory('dist', 'index.html')
-    return "PiMonitor Server Running. Build the React app to /dist to see the UI.", 200
+    if os.path.exists(os.path.join(DIST_DIR, 'index.html')):
+        return send_from_directory(DIST_DIR, 'index.html')
+    
+    # Fallback if UI is not built
+    return \"\"\"
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>PiMonitor Server</title>
+        <style>
+            body { background: #0f172a; color: #e2e8f0; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+            .card { background: #1e293b; padding: 2rem; border-radius: 1rem; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); max-width: 500px; text-align: center; border: 1px solid #334155; }
+            code { background: #0f172a; padding: 0.2rem 0.4rem; border-radius: 0.3rem; font-family: monospace; color: #38bdf8; }
+            h1 { margin-top: 0; color: #fff; }
+            .status { color: #10b981; font-weight: bold; margin-bottom: 1.5rem; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>PiMonitor Server</h1>
+            <div class="status">✓ API Operational</div>
+            <p>The backend is running successfully!</p>
+            <p>To see the dashboard, you need to build the React frontend:</p>
+            <div style="text-align: left; background: #0f172a; padding: 1rem; border-radius: 0.5rem; margin: 1rem 0;">
+                <div style="color: #94a3b8; margin-bottom: 0.5rem;"># In your project root:</div>
+                <code>npm run build</code>
+            </div>
+            <p style="font-size: 0.9rem; color: #94a3b8;">After building, reload this page.</p>
+        </div>
+    </body>
+    </html>
+    \"\"\", 200
 
 @app.route('/<path:path>')
 def serve_static(path):
-    if os.path.exists(f'dist/{{path}}'):
-        return send_from_directory('dist', path)
+    # Check if path exists in dist
+    if os.path.exists(os.path.join(DIST_DIR, path)):
+        return send_from_directory(DIST_DIR, path)
+    
+    # Otherwise fallback to index.html for SPA routing
+    if os.path.exists(os.path.join(DIST_DIR, 'index.html')):
+        return send_from_directory(DIST_DIR, 'index.html')
+        
     return serve_index()
 
 def get_ip():
@@ -416,8 +458,7 @@ def main():
     print(f"  Filename: {script_name}")
     print("\nTo start the server:")
     print(f"  python {script_name}")
-    print("\nNote: This server now includes built-in monitoring for this machine.")
-    print("You do not need to run a separate agent script for localhost.")
+    print("\nNote: Ensure you run 'npm run build' to generate the UI assets in /dist.")
 
 if __name__ == "__main__":
     main()
