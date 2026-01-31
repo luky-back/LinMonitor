@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { translations } from '../translations';
 import { User, UserRole } from '../types';
-import { Shield, Key, UserPlus, Server, Check, ArrowRight } from 'lucide-react';
+import { Shield, Key, UserPlus, Server, Check, ArrowRight, XCircle } from 'lucide-react';
 
 interface AuthProps {
   mode: 'login' | 'register' | 'setup';
   language: string;
-  onLogin: (username: string, password?: string) => void;
-  onRegister: (code: string, username: string, password: string) => void;
-  onSetup: (username: string, password: string) => void;
+  onLogin: (username: string, password?: string) => Promise<void>;
+  onRegister: (code: string, username: string, password: string) => Promise<void>;
+  onSetup: (username: string, password: string) => Promise<void>;
   onSwitchMode: (mode: 'login' | 'register') => void;
   error?: string;
 }
@@ -19,8 +19,10 @@ const Auth: React.FC<AuthProps> = ({ mode, language, onLogin, onRegister, onSetu
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [isSuccess, setIsSuccess] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [renderMode, setRenderMode] = useState(mode);
+  const [shake, setShake] = useState(false);
 
   // Handle smooth transitions between Login/Register
   useEffect(() => {
@@ -33,46 +35,53 @@ const Auth: React.FC<AuthProps> = ({ mode, language, onLogin, onRegister, onSetu
         setUsername('');
         setPassword('');
         setCode('');
+        setIsSuccess(false);
       }, 300); // Match animation duration
       return () => clearTimeout(timer);
     }
   }, [mode]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    // Fake success delay for visual feedback if not error
-    if (!error) {
-       // We perform the action. If it fails, parent will set error prop.
-       // If it succeeds, we show success animation.
-       // Here we wrap the parent call to intercept.
-       const performAction = () => {
-         if (renderMode === 'login') {
-            onLogin(username, password);
-         } else if (renderMode === 'setup') {
-            onSetup(username, password);
-         } else {
-            onRegister(code, username, password);
-         }
-       };
-
-       setIsSuccess(true);
-       setTimeout(() => {
-         performAction();
-       }, 800);
-    }
-  };
-  
-  // Reset success if error appears
+  // If external error prop changes, trigger shake
   useEffect(() => {
     if (error) {
       setIsSuccess(false);
+      setShake(true);
+      const timer = setTimeout(() => setShake(false), 500);
+      return () => clearTimeout(timer);
     }
   }, [error]);
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isLoading) return;
+
+    setIsLoading(true);
+    try {
+      if (renderMode === 'login') {
+         await onLogin(username, password);
+      } else if (renderMode === 'setup') {
+         await onSetup(username, password);
+      } else {
+         await onRegister(code, username, password);
+      }
+      // Only show success if no error thrown
+      setIsSuccess(true);
+    } catch (err) {
+      // Error is handled by parent setting 'error' prop usually, 
+      // or we catch it here to stop loading state
+      setShake(true);
+      setTimeout(() => setShake(false), 500);
+      setIsSuccess(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
   const containerAnimation = isExiting 
     ? "opacity-0 scale-95 translate-y-4" 
     : "opacity-100 scale-100 translate-y-0";
+
+  const shakeAnimation = shake ? "animate-in shake duration-300" : "";
 
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 overflow-hidden relative">
@@ -83,14 +92,13 @@ const Auth: React.FC<AuthProps> = ({ mode, language, onLogin, onRegister, onSetu
       {/* Ripple/Wave Effect Container */}
       {isSuccess && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
-           {/* The "Water Stone" Ripple */}
            <div className="w-[50vw] h-[50vw] bg-emerald-500/10 rounded-full ripple-out"></div>
            <div className="w-[40vw] h-[40vw] bg-blue-500/10 rounded-full ripple-out delay-100 absolute"></div>
            <div className="w-[30vw] h-[30vw] bg-purple-500/10 rounded-full ripple-out delay-200 absolute"></div>
         </div>
       )}
 
-      <div className={`max-w-md w-full bg-slate-900/80 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-2xl p-8 transition-all duration-300 ease-out transform z-10 drop-in ${containerAnimation}`}>
+      <div className={`max-w-md w-full bg-slate-900/80 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-2xl p-8 transition-all duration-300 ease-out transform z-10 drop-in ${containerAnimation} ${shakeAnimation}`}>
         
         {isSuccess ? (
           <div className="flex flex-col items-center justify-center py-10 animate-in zoom-in-95 duration-300">
@@ -120,8 +128,8 @@ const Auth: React.FC<AuthProps> = ({ mode, language, onLogin, onRegister, onSetu
             </p>
 
             {error && (
-              <div className="mb-6 p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-sm text-center animate-in shake duration-300">
-                {error}
+              <div className="mb-6 p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-sm text-center flex items-center justify-center gap-2">
+                <XCircle size={16} /> {error}
               </div>
             )}
 
@@ -167,12 +175,13 @@ const Auth: React.FC<AuthProps> = ({ mode, language, onLogin, onRegister, onSetu
 
               <button
                 type="submit"
+                disabled={isLoading}
                 className={`w-full py-2.5 text-white rounded-lg font-medium transition-all shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2 animate-in slide-in-from-bottom-2 fade-in duration-500 delay-300 ${
                   renderMode === 'setup' ? 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-900/20' : 'bg-blue-600 hover:bg-blue-500 shadow-blue-900/20'
-                }`}
+                } ${isLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
               >
-                {renderMode === 'setup' ? "Initialize Server" : renderMode === 'register' ? t.register : t.login}
-                <ArrowRight size={18} />
+                {isLoading ? "Processing..." : (renderMode === 'setup' ? "Initialize Server" : renderMode === 'register' ? t.register : t.login)}
+                {!isLoading && <ArrowRight size={18} />}
               </button>
             </form>
 
