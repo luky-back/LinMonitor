@@ -138,6 +138,7 @@ const App: React.FC = () => {
         setAuthError('');
     } catch (e: any) {
         setAuthError(e.message || "Setup failed");
+        throw e; // Re-throw for Auth component
     }
   };
 
@@ -149,6 +150,7 @@ const App: React.FC = () => {
           setAuthError('');
       } catch (e: any) {
           setAuthError('Invalid credentials');
+          throw e; // Re-throw for Auth component
       }
   }
 
@@ -160,6 +162,7 @@ const App: React.FC = () => {
         setAuthError('');
     } catch (e: any) {
         setAuthError(e.message || 'Registration failed');
+        throw e; // Re-throw for Auth component
     }
   };
 
@@ -200,7 +203,16 @@ const App: React.FC = () => {
   const handleProcessAction = (did: string, pid: number, action: ProcessAction) => {}; 
   const handleRemoveDevice = (id: string) => {}; 
   const handleUpdateLimits = (limits: ResourceLimits) => {};
-  const handleUpdateConfigChange = (url: string) => {}; 
+  
+  const handleUpdateConfigChange = async (url: string) => {
+      try {
+          await api.updateSettings({ repoUrl: url });
+          setUpdateConfig(prev => ({ ...prev, repoUrl: url }));
+      } catch (e) {
+          console.error("Failed to update config", e);
+      }
+  }; 
+  
   const handleTriggerUpdate = async () => { await api.triggerUpdate(); };
 
   // --- RENDER ---
@@ -267,7 +279,6 @@ const App: React.FC = () => {
       <Auth 
         mode={authMode as any} 
         language={language} 
-        // @ts-ignore
         onLogin={(u: string, p?: string) => handleRealLogin(u, p || '')} 
         onRegister={handleRegister} 
         onSetup={handleSetupOwner} 
