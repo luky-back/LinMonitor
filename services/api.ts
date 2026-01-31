@@ -4,16 +4,13 @@ const STORAGE_KEY = 'pimonitor_api_url';
 
 // Helper to determine initial URL
 const getInitialBaseUrl = () => {
-  // 1. Check local storage (persistence across refreshes)
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored) return stored;
   
-  // 2. Check if running in Vite dev mode (standard port 5173)
   if (window.location.port === '5173') {
     return 'http://127.0.0.1:3000/api';
   }
   
-  // 3. Default to relative path (assumes "all-in-one" serving by backend)
   return '/api';
 };
 
@@ -21,10 +18,8 @@ let API_BASE = getInitialBaseUrl();
 
 export const api = {
   setBaseUrl(url: string) {
-    // Standardize URL: remove trailing slash, ensure protocol
     let cleanUrl = url.trim().replace(/\/$/, '');
     
-    // If user enters just a path like "/api" or empty, handle it
     if (cleanUrl === '' || cleanUrl.startsWith('/')) {
         API_BASE = cleanUrl || '/api';
         if (!API_BASE.endsWith('/api')) API_BASE += '/api';
@@ -36,14 +31,12 @@ export const api = {
         cleanUrl = `http://${cleanUrl}`;
     }
 
-    // Append /api if missing, but avoid /api/api
     if (!cleanUrl.endsWith('/api')) {
        API_BASE = `${cleanUrl}/api`;
     } else {
        API_BASE = cleanUrl;
     }
     
-    // Persist to storage
     localStorage.setItem(STORAGE_KEY, API_BASE);
   },
 
@@ -53,14 +46,11 @@ export const api = {
 
   // Auth & Setup
   async checkSetup(): Promise<{ setupRequired: boolean }> {
-    // We do NOT catch errors here. We let them bubble up
-    // so the UI knows the server is unreachable.
     try {
         const res = await fetch(`${API_BASE}/auth/check`);
         if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
         return await res.json();
     } catch (e: any) {
-        // Enhance error message for common issues
         if (e.message.includes('Failed to fetch')) {
             throw new Error(`Failed to fetch from ${API_BASE}. Is the server running?`);
         }
@@ -154,6 +144,14 @@ export const api = {
     return await res.json();
   },
 
+  async deleteMail(mailId: string): Promise<void> {
+      await fetch(`${API_BASE}/mail/${mailId}`, { method: 'DELETE' });
+  },
+
+  async markAllMailsRead(userId: string): Promise<void> {
+      await fetch(`${API_BASE}/mail/${userId}/read-all`, { method: 'PUT' });
+  },
+
   async getNotifications(userId: string): Promise<Notification[]> {
     const res = await fetch(`${API_BASE}/notifications/${userId}`);
     if (!res.ok) return [];
@@ -162,6 +160,10 @@ export const api = {
 
   async markNotificationRead(id: string): Promise<void> {
     await fetch(`${API_BASE}/notifications/${id}/read`, { method: 'PUT' });
+  },
+
+  async clearAllNotifications(userId: string): Promise<void> {
+      await fetch(`${API_BASE}/notifications/${userId}/clear`, { method: 'DELETE' });
   },
 
   // System
@@ -179,6 +181,14 @@ export const api = {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(settings)
+      });
+  },
+
+  async executePowerAction(action: 'shutdown' | 'restart'): Promise<void> {
+      await fetch(`${API_BASE}/system/power`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action })
       });
   }
 };
