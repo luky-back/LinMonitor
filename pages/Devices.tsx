@@ -23,7 +23,9 @@ import {
   AlertTriangle,
   FileText,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Power,
+  RefreshCw
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -37,6 +39,7 @@ import {
 import { Device, PM2Process, AppSettings, ProcessAction } from '../types';
 import { translations } from '../translations';
 import { DeviceHardware, DeviceTerminal } from '../components/DeviceWidgets';
+import SecurityModal from '../components/SecurityModal';
 
 interface DevicesProps {
   devices: Device[];
@@ -88,6 +91,7 @@ const activeTabMap: Record<string, string> = {
   orange: 'bg-slate-700 text-white shadow-sm ring-1 ring-orange-500/50',
 };
 
+// ... AddDeviceModal ...
 const AddDeviceModal: React.FC<{ isOpen: boolean; onClose: () => void; t: any }> = ({ isOpen, onClose, t }) => {
   if (!isOpen) return null;
 
@@ -153,6 +157,7 @@ const AddDeviceModal: React.FC<{ isOpen: boolean; onClose: () => void; t: any }>
   );
 };
 
+// ... RemoveDeviceModal ...
 const RemoveDeviceModal: React.FC<{ isOpen: boolean; onClose: () => void; onConfirm: () => void; deviceName: string; t: any }> = ({ isOpen, onClose, onConfirm, deviceName, t }) => {
   if (!isOpen) return null;
   return (
@@ -185,8 +190,8 @@ const RemoveDeviceModal: React.FC<{ isOpen: boolean; onClose: () => void; onConf
 interface ProcessRowProps {
   process: PM2Process;
   deviceId: string;
-  onRename: any;
-  onAction: (deviceId: string, pid: number, action: ProcessAction) => void;
+  onRename: (deviceId: string, processId: number, name: string) => void;
+  onAction: (deviceId: string, processId: number, action: ProcessAction) => void;
   isMenuOpen: boolean;
   onToggleMenu: (pid: number) => void;
   onCloseMenu: () => void;
@@ -194,6 +199,7 @@ interface ProcessRowProps {
   t: any;
 }
 
+// ... ProcessRow ...
 const ProcessRow: React.FC<ProcessRowProps> = ({ 
   process, 
   deviceId, 
@@ -374,6 +380,7 @@ const Devices: React.FC<DevicesProps> = ({ devices, onRenameDevice, onRenameProc
   const [activeMenuPid, setActiveMenuPid] = useState<number | null>(null);
   const [processSearch, setProcessSearch] = useState("");
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [activeAction, setActiveAction] = useState<'reboot' | 'shutdown' | null>(null);
 
   const t = translations[language] || translations['en'];
 
@@ -410,6 +417,14 @@ const Devices: React.FC<DevicesProps> = ({ devices, onRenameDevice, onRenameProc
       onRenameDevice(selectedDevice.id, editName);
     }
     setIsEditingDeviceName(false);
+  };
+  
+  const handlePowerActionConfirm = () => {
+    if (activeAction && selectedDevice) {
+       // In a real app, this would send an API call
+       alert(`Sending ${activeAction} command to ${selectedDevice.name}... (Simulation)`);
+       setActiveAction(null);
+    }
   };
 
   const filteredProcesses = selectedDevice?.processes.filter(p => 
@@ -495,12 +510,34 @@ const Devices: React.FC<DevicesProps> = ({ devices, onRenameDevice, onRenameProc
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <div className="flex p-1 bg-slate-800 rounded-lg mr-4 border border-slate-700">
+              <div className="flex p-1 bg-slate-800 rounded-lg mr-2 border border-slate-700">
                   <button onClick={() => handleTabChange('overview')} className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${activeTab === 'overview' ? activeTabMap[settings.accentColor] : 'text-slate-400 hover:text-white'}`}>{t.overview}</button>
                   <button onClick={() => handleTabChange('hardware')} className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium transition-all ${activeTab === 'hardware' ? activeTabMap[settings.accentColor] : 'text-slate-400 hover:text-white'}`}><HardDrive size={14} />{t.hardware}</button>
                   <button disabled={selectedDevice.status === 'offline'} onClick={() => handleTabChange('terminal')} className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium transition-all ${selectedDevice.status === 'offline' ? 'opacity-50 cursor-not-allowed text-slate-600' : activeTab === 'terminal' ? activeTabMap[settings.accentColor] : 'text-slate-400 hover:text-white'}`}>{selectedDevice.status === 'offline' ? <Lock size={14} /> : <Terminal size={14} />}{t.terminal}</button>
               </div>
-              <button onClick={() => setIsRemoveModalOpen(true)} className="p-2 text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"><Trash2 size={20} /></button>
+              <div className="flex items-center gap-1 border-l border-slate-700 pl-3">
+                 <button 
+                   onClick={() => setActiveAction('reboot')}
+                   className="p-2 text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors"
+                   title={t.reboot || "Reboot Device"}
+                 >
+                   <RefreshCw size={18} />
+                 </button>
+                 <button 
+                    onClick={() => setActiveAction('shutdown')}
+                    className="p-2 text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                    title={t.shutdown || "Shutdown Device"}
+                 >
+                    <Power size={18} />
+                 </button>
+                 <button 
+                   onClick={() => setIsRemoveModalOpen(true)} 
+                   className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors ml-1"
+                   title={t.confirmRemoveTitle}
+                 >
+                   <Trash2 size={18} />
+                 </button>
+              </div>
             </div>
           </div>
 
@@ -574,6 +611,17 @@ const Devices: React.FC<DevicesProps> = ({ devices, onRenameDevice, onRenameProc
           deviceName={selectedDevice.name}
           t={t}
         />
+      )}
+      {activeAction && selectedDevice && (
+         <SecurityModal 
+            isOpen={!!activeAction}
+            onClose={() => setActiveAction(null)}
+            onConfirm={handlePowerActionConfirm}
+            title={`${activeAction === 'reboot' ? t.reboot : t.shutdown} ${selectedDevice.name}`}
+            warning={activeAction === 'reboot' ? t.deviceRestartWarning : t.deviceShutdownWarning}
+            length={activeAction === 'shutdown' ? 12 : 8}
+            t={t}
+         />
       )}
     </div>
   );
