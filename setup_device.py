@@ -89,7 +89,43 @@ def format_uptime(start_ts):
     return f"{{seconds // 86400}}d"
 
 def get_hardware_info():
-    # Basic hardware info
+    storage_info = []
+    try:
+        partitions = psutil.disk_partitions(all=False)
+        for part in partitions:
+            try:
+                # Get Usage per partition
+                usage = psutil.disk_usage(part.mountpoint)
+                
+                # Try to get model on Linux
+                model = "Generic Storage"
+                if platform.system() == 'Linux':
+                    try:
+                        # Map partition to block device (e.g., /dev/sda1 -> sda)
+                        device_name = part.device.split('/')[-1]
+                        # Remove digits for partition (sda1 -> sda), roughly
+                        block_device = ''.join([i for i in device_name if not i.isdigit()])
+                        
+                        model_path = f"/sys/class/block/{{block_device}}/device/model"
+                        if os.path.exists(model_path):
+                            with open(model_path, 'r') as f:
+                                model = f.read().strip()
+                    except:
+                        pass
+
+                storage_info.append({{
+                    "name": part.device,
+                    "model": model,
+                    "size": f"{{round(usage.total / (1024**3), 1)}} GB",
+                    "type": part.fstype,
+                    "interface": part.mountpoint,
+                    "usage": usage.percent
+                }})
+            except:
+                continue
+    except:
+        pass
+
     try:
         mem = psutil.virtual_memory()
         return {{
@@ -111,15 +147,7 @@ def get_hardware_info():
                 "vram": "Shared",
                 "driver": "N/A"
             }},
-            "storage": [
-                {{
-                    "name": part.device,
-                    "model": "Generic Storage",
-                    "size": f"{{round(psutil.disk_usage(part.mountpoint).total / (1024**3), 1)}} GB",
-                    "type": part.fstype,
-                    "interface": "N/A"
-                }} for part in psutil.disk_partitions(all=False)
-            ]
+            "storage": storage_info
         }}
     except:
         return {{}}
