@@ -172,5 +172,13 @@ export const api = {
   
   async triggerUpdate(): Promise<void> {
       await fetch(`${API_BASE}/update/execute`, { method: 'POST' });
+  },
+
+  async updateSettings(settings: Partial<UpdateConfig>): Promise<void> {
+      await fetch(`${API_BASE}/settings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(settings)
+      });
   }
 };
