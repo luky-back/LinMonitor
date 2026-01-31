@@ -109,6 +109,12 @@ const App: React.FC = () => {
                 setInvites(inviteList);
             }
             
+            const mailList = await api.getMails(currentUser.id);
+            setMails(mailList);
+    
+            const notifList = await api.getNotifications(currentUser.id);
+            setNotifications(notifList);
+
             const updateStatus = await api.getUpdateStatus();
             setUpdateConfig(prev => ({...prev, ...updateStatus}));
 
@@ -179,18 +185,16 @@ const App: React.FC = () => {
   };
 
   const handleRequestInvite = () => alert("Request sent (Simulation)");
-  const handleSendMail = (toId: string, subject: string, body: string) => {
-      const newMail: Mail = {
-        id: `m-${Date.now()}`,
-        fromId: currentUser?.id || '',
-        toId,
-        subject,
-        body,
-        read: false,
-        timestamp: new Date().toISOString()
-      };
-      setMails(prev => [...prev, newMail]);
+  
+  const handleSendMail = async (toId: string, subject: string, body: string) => {
+      if (!currentUser) return;
+      try {
+          await api.sendMail(currentUser.id, toId, subject, body);
+          const mailList = await api.getMails(currentUser.id);
+          setMails(mailList);
+      } catch (e) { console.error("Failed to send mail", e); }
   };
+
   const handleRenameDevice = (id: string, name: string) => {}; 
   const handleRenameProcess = (did: string, pid: number, name: string) => {};
   const handleProcessAction = (did: string, pid: number, action: ProcessAction) => {}; 
@@ -284,7 +288,10 @@ const App: React.FC = () => {
         currentUser={currentUser}
         notifications={userNotifications}
         onLogout={handleLogout}
-        onClearNotification={(id) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))}
+        onClearNotification={async (id) => {
+           await api.markNotificationRead(id);
+           setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+        }}
       >
         <Routes>
           <Route path="/" element={<Home devices={devices} language={language} settings={settings} />} />
