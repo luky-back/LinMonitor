@@ -1,0 +1,5 @@
+{
+  "name": "PiMonitor Pro",
+  "description": "A lightweight dashboard to monitor Raspberry Pi devices and PM2 processes in real-time.",
+  "requestFramePermissions": []
+}
