@@ -20,10 +20,15 @@ export const InfoRow: React.FC<{ label: string; value: string | number }> = ({ l
 export const StorageItem: React.FC<{ drive: HardwareSpecs['storage'][0]; t: any }> = ({ drive, t }) => {
     const [expanded, setExpanded] = useState(false);
     
-    const usedPercent = Math.floor(Math.random() * 40) + 20; 
-    const dataPercent = Math.floor(Math.random() * 15) + 5;
-    const swapPercent = 5;
-    const freePercent = 100 - usedPercent - dataPercent - swapPercent;
+    // Use real usage if available, else fallback to 0
+    const realUsage = drive.usage !== undefined ? Math.round(drive.usage) : 0;
+    
+    // Simulate other partition distribution just for visual variety if real breakdown not available
+    // But ensure 'Used' matches the real usage.
+    const usedPercent = realUsage; 
+    const dataPercent = 0; // Simplified for now as we only get total mount usage
+    const swapPercent = 0;
+    const freePercent = 100 - usedPercent;
 
     return (
         <div className="bg-slate-950/50 rounded-lg border border-slate-800 overflow-hidden mb-4 last:mb-0 transition-all">
@@ -33,7 +38,7 @@ export const StorageItem: React.FC<{ drive: HardwareSpecs['storage'][0]; t: any 
                 title="Click to toggle details"
             >
                 <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${usedPercent > 90 ? 'bg-rose-500/10 text-rose-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
                         <HardDrive size={20} />
                     </div>
                     <div>
@@ -41,7 +46,15 @@ export const StorageItem: React.FC<{ drive: HardwareSpecs['storage'][0]; t: any 
                         <div className="text-xs text-slate-500 font-mono">{drive.size} • {drive.type}</div>
                     </div>
                 </div>
-                {expanded ? <ChevronUp size={18} className="text-slate-500" /> : <ChevronDown size={18} className="text-slate-500" />}
+                <div className="flex items-center gap-3">
+                    <div className="text-right">
+                        <div className="text-xs text-slate-400">{usedPercent}% Used</div>
+                        <div className="w-16 h-1.5 bg-slate-800 rounded-full mt-1 overflow-hidden">
+                            <div className={`h-full ${usedPercent > 90 ? 'bg-rose-500' : 'bg-emerald-500'}`} style={{ width: `${usedPercent}%` }}></div>
+                        </div>
+                    </div>
+                    {expanded ? <ChevronUp size={18} className="text-slate-500" /> : <ChevronDown size={18} className="text-slate-500" />}
+                </div>
             </div>
 
             {expanded && (
@@ -64,32 +77,23 @@ export const StorageItem: React.FC<{ drive: HardwareSpecs['storage'][0]; t: any 
                         </div>
                         <div>
                             <p className="text-xs text-slate-500">{t.temperature}</p>
-                            <p className="text-sm text-slate-200">32°C</p>
+                            <p className="text-sm text-slate-200">--</p>
                         </div>
                     </div>
 
                     <div>
                         <div className="flex justify-between items-center mb-1">
                             <span className="text-xs text-slate-500">{t.partitions}</span>
-                            <span className="text-xs text-slate-400 font-mono">/dev/sda1 (ext4)</span>
+                            <span className="text-xs text-slate-400 font-mono">{drive.interface} ({drive.type})</span>
                         </div>
-                        <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden flex cursor-help" title={`Usage Distribution: ${t.system} ${usedPercent}%, ${t.data} ${dataPercent}%, ${t.swap} ${swapPercent}%, ${t.free} ${freePercent}%`}>
-                            <div style={{ width: `${usedPercent}%` }} className="h-full bg-blue-500" />
-                            <div style={{ width: `${dataPercent}%` }} className="h-full bg-indigo-500" />
-                            <div style={{ width: `${swapPercent}%` }} className="h-full bg-amber-500" />
+                        <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden flex cursor-help" title={`Usage Distribution: ${t.system} ${usedPercent}%, ${t.free} ${freePercent}%`}>
+                            <div style={{ width: `${usedPercent}%` }} className={`h-full ${usedPercent > 90 ? 'bg-rose-500' : 'bg-blue-500'}`} />
+                            <div style={{ width: `${freePercent}%` }} className="h-full bg-slate-700" />
                         </div>
                         <div className="flex gap-4 mt-2 flex-wrap">
                              <div className="flex items-center gap-1.5" title={`${t.system} Partition`}>
-                                <div className="w-2 h-2 rounded-full bg-blue-500" />
-                                <span className="text-[10px] text-slate-400">{t.system || "System"} ({usedPercent}%)</span>
-                             </div>
-                             <div className="flex items-center gap-1.5" title={`${t.data} Partition`}>
-                                <div className="w-2 h-2 rounded-full bg-indigo-500" />
-                                <span className="text-[10px] text-slate-400">{t.data || "Data"} ({dataPercent}%)</span>
-                             </div>
-                             <div className="flex items-center gap-1.5" title={`${t.swap} Partition`}>
-                                <div className="w-2 h-2 rounded-full bg-amber-500" />
-                                <span className="text-[10px] text-slate-400">{t.swap || "Swap"} ({swapPercent}%)</span>
+                                <div className={`w-2 h-2 rounded-full ${usedPercent > 90 ? 'bg-rose-500' : 'bg-blue-500'}`} />
+                                <span className="text-[10px] text-slate-400">{t.system || "Used"} ({usedPercent}%)</span>
                              </div>
                              <div className="flex items-center gap-1.5" title={`${t.free} Space`}>
                                 <div className="w-2 h-2 rounded-full bg-slate-700" />
