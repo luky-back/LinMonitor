@@ -145,5 +145,5 @@ export interface UpdateConfig {
   lastChecked: string;
   status: 'up-to-date' | 'update-available' | 'checking' | 'updating';
   availableVersion?: string;
-  currentVersion: string;
+  currentVersion: string
 }
