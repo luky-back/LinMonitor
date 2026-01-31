@@ -48,6 +48,7 @@ USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 INVITES_FILE = os.path.join(DATA_DIR, 'invites.json')
 MAILS_FILE = os.path.join(DATA_DIR, 'mails.json')
 NOTIFICATIONS_FILE = os.path.join(DATA_DIR, 'notifications.json')
+SETTINGS_FILE = os.path.join(DATA_DIR, 'settings.json')
 DIST_DIR = os.path.join(BASE_DIR, 'dist')
 
 app = Flask(__name__, static_folder='dist', static_url_path='')
@@ -56,7 +57,6 @@ CORS(app, resources={{r"/*": {{"origins": "*"}}}})
 
 # In-memory stores
 devices_store = {{}}
-update_manager = None # Initialized later
 
 # --- PERSISTENCE HELPERS ---
 def ensure_data_dir():
@@ -76,6 +76,11 @@ def save_json(filepath, data):
     ensure_data_dir()
     with open(filepath, 'w') as f:
         json.dump(data, f, indent=2)
+
+# Load Initial Settings
+server_settings = load_json(SETTINGS_FILE, {{
+    "repoUrl": "github.com/user/pimonitor-repo"
+}})
 
 # --- MONITORING LOGIC (Self-Monitoring) ---
 
@@ -159,6 +164,43 @@ def get_system_stats():
     }}
 
 def get_hardware_info():
+    storage_info = []
+    try:
+        partitions = psutil.disk_partitions(all=False)
+        for part in partitions:
+            try:
+                # Get Usage per partition
+                usage = psutil.disk_usage(part.mountpoint)
+                
+                # Try to get model on Linux
+                model = "Generic Storage"
+                if platform.system() == 'Linux':
+                    try:
+                        # Map partition to block device (e.g., /dev/sda1 -> sda)
+                        device_name = part.device.split('/')[-1]
+                        # Remove digits for partition (sda1 -> sda), roughly
+                        block_device = ''.join([i for i in device_name if not i.isdigit()])
+                        
+                        model_path = f"/sys/class/block/{{block_device}}/device/model"
+                        if os.path.exists(model_path):
+                            with open(model_path, 'r') as f:
+                                model = f.read().strip()
+                    except:
+                        pass
+
+                storage_info.append({{
+                    "name": part.device,
+                    "model": model,
+                    "size": f"{{round(usage.total / (1024**3), 1)}} GB",
+                    "type": part.fstype,
+                    "interface": part.mountpoint,
+                    "usage": usage.percent
+                }})
+            except:
+                continue
+    except Exception as e:
+        print(f"Storage info error: {{e}}")
+
     try:
         mem = psutil.virtual_memory()
         cpu_freq = psutil.cpu_freq()
@@ -181,15 +223,7 @@ def get_hardware_info():
                 "vram": "Shared",
                 "driver": "N/A"
             }},
-            "storage": [
-                {{
-                    "name": part.device,
-                    "model": "Generic Storage",
-                    "size": f"{{round(psutil.disk_usage(part.mountpoint).total / (1024**3), 1)}} GB",
-                    "type": part.fstype,
-                    "interface": part.mountpoint
-                }} for part in psutil.disk_partitions(all=False)
-            ]
+            "storage": storage_info
         }}
     except Exception as e:
         print(f"Hardware info error: {{e}}")
@@ -454,9 +488,19 @@ def get_devices():
         results.append(dev)
     return jsonify(results)
 
+@app.route('/api/settings', methods=['POST'])
+def update_settings():
+    data = request.json
+    # Update global settings in memory
+    global server_settings
+    server_settings.update(data)
+    # Persist to disk
+    save_json(SETTINGS_FILE, server_settings)
+    return jsonify({{'status': 'success', 'settings': server_settings}})
+
 @app.route('/api/update/check', methods=['GET'])
 def check_update():
-    return jsonify({{ "status": "up-to-date", "currentVersion": "v1.0.0", "lastChecked": datetime.now().strftime("%H:%M:%S"), "repoUrl": "github.com/user/repo" }})
+    return jsonify({{ "status": "up-to-date", "currentVersion": "v1.0.0", "lastChecked": datetime.now().strftime("%H:%M:%S"), "repoUrl": server_settings.get('repoUrl') }})
 
 @app.route('/api/update/execute', methods=['POST'])
 def execute_update():
