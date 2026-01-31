@@ -17,7 +17,9 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [connectionError, setConnectionError] = useState(false);
   const [errorDetails, setErrorDetails] = useState<string>('');
-  const [apiUrl, setApiUrl] = useState(api.getBaseUrl().replace('/api', '')); // For UI input
+  
+  // Initialize from API service which now handles localStorage
+  const [apiUrl, setApiUrl] = useState(api.getBaseUrl().replace('/api', '')); 
   
   const [devices, setDevices] = useState<Device[]>([]);
   const [server, setServer] = useState<Device | any>(null);
@@ -51,7 +53,7 @@ const App: React.FC = () => {
     setConnectionError(false);
     setErrorDetails('');
     
-    // Update API service with current URL in state
+    // Update API service with current URL in state (and persist it)
     api.setBaseUrl(apiUrl);
 
     try {
