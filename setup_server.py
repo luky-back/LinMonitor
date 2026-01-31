@@ -31,6 +31,7 @@ import socket
 import psutil
 import platform
 import mimetypes
+import subprocess
 from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 from datetime import datetime
@@ -45,6 +46,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 INVITES_FILE = os.path.join(DATA_DIR, 'invites.json')
+MAILS_FILE = os.path.join(DATA_DIR, 'mails.json')
+NOTIFICATIONS_FILE = os.path.join(DATA_DIR, 'notifications.json')
 DIST_DIR = os.path.join(BASE_DIR, 'dist')
 
 app = Flask(__name__, static_folder='dist', static_url_path='')
@@ -75,6 +78,51 @@ def save_json(filepath, data):
         json.dump(data, f, indent=2)
 
 # --- MONITORING LOGIC (Self-Monitoring) ---
+
+def format_uptime(start_ts):
+    if not start_ts: return "0s"
+    # pm_uptime is epoch ms
+    seconds = int(time.time() - (start_ts / 1000))
+    if seconds < 60: return f"{{seconds}}s"
+    if seconds < 3600: return f"{{seconds // 60}}m"
+    if seconds < 86400: return f"{{seconds // 3600}}h"
+    return f"{{seconds // 86400}}d"
+
+def get_pm2_stats():
+    # Requires PM2 to be installed and accessible in path on the host
+    try:
+        if os.name == 'nt':
+            cmd = ['pm2', 'jlist'] 
+            result = subprocess.check_output(cmd, shell=True)
+        else:
+            result = subprocess.check_output(['pm2', 'jlist'])
+            
+        processes = json.loads(result)
+        
+        proc_list = []
+        for p in processes:
+            env = p.get('pm2_env', {{}})
+            monit = p.get('monit', {{}})
+            
+            status = env.get('status')
+            if status not in ['online', 'stopped', 'errored', 'launching']:
+                status = 'stopped'
+                
+            proc_list.append({{
+                "pid": p.get("pid", 0),
+                "name": p.get("name", "unknown"),
+                "pm_id": p.get("pm_id", 0),
+                "status": status,
+                "cpu": monit.get("cpu", 0),
+                "memory": round(monit.get("memory", 0) / 1024 / 1024, 1), # Bytes -> MB
+                "uptime": format_uptime(env.get("pm_uptime", 0)),
+                "restarts": env.get("restart_time", 0),
+                "logs": [] 
+            }})
+        return proc_list
+    except Exception:
+        # PM2 not installed or failed
+        return []
 
 def get_system_stats():
     cpu_pct = psutil.cpu_percent(interval=None)
@@ -161,6 +209,7 @@ def monitor_local_system():
     while True:
         try:
             stats = get_system_stats()
+            pm2_procs = get_pm2_stats()
             
             # Update store directly
             now_str = datetime.now().strftime('%H:%M:%S')
@@ -175,7 +224,7 @@ def monitor_local_system():
                     'status': 'online',
                     'lastSeen': current_time,
                     'stats': stats,
-                    'processes': [], # PM2 logic omitted for simplicity in self-monitor, can add later
+                    'processes': pm2_procs,
                     'hardware': hardware_info,
                     'history': {{ 'cpu': [], 'memory': [], 'network': [] }}
                 }}
@@ -184,6 +233,7 @@ def monitor_local_system():
                 dev['status'] = 'online'
                 dev['lastSeen'] = current_time
                 dev['stats'] = stats
+                dev['processes'] = pm2_procs
             
             # Update history
             dev = devices_store[device_id]
@@ -289,6 +339,64 @@ def delete_invite(code):
     invites = [i for i in invites if i['code'] != code]
     save_json(INVITES_FILE, invites)
     return jsonify({{'status': 'deleted'}})
+
+# --- MAILS & NOTIFICATIONS ---
+
+@app.route('/api/mail/<user_id>', methods=['GET'])
+def get_mails(user_id):
+    all_mails = load_json(MAILS_FILE, [])
+    # Return mails where user is sender OR receiver
+    user_mails = [m for m in all_mails if m['toId'] == user_id or m['fromId'] == user_id]
+    return jsonify(user_mails)
+
+@app.route('/api/mail', methods=['POST'])
+def send_mail():
+    data = request.json
+    all_mails = load_json(MAILS_FILE, [])
+    new_mail = {{
+        'id': f"m-{{int(time.time()*1000)}}",
+        'fromId': data['fromId'],
+        'toId': data['toId'],
+        'subject': data['subject'],
+        'body': data['body'],
+        'read': False,
+        'timestamp': datetime.now().isoformat()
+    }}
+    all_mails.append(new_mail)
+    save_json(MAILS_FILE, all_mails)
+    
+    # Auto-generate notification for receiver
+    all_notifs = load_json(NOTIFICATIONS_FILE, [])
+    new_notif = {{
+        'id': f"n-{{int(time.time()*1000)}}",
+        'userId': data['toId'],
+        'type': 'info',
+        'message': f"New mail received",
+        'read': False,
+        'timestamp': datetime.now().isoformat()
+    }}
+    all_notifs.append(new_notif)
+    save_json(NOTIFICATIONS_FILE, all_notifs)
+    
+    return jsonify(new_mail)
+
+@app.route('/api/notifications/<user_id>', methods=['GET'])
+def get_notifications(user_id):
+    all_notifs = load_json(NOTIFICATIONS_FILE, [])
+    user_notifs = [n for n in all_notifs if n['userId'] == user_id]
+    return jsonify(user_notifs)
+
+@app.route('/api/notifications/<notif_id>/read', methods=['PUT'])
+def mark_notification_read(notif_id):
+    all_notifs = load_json(NOTIFICATIONS_FILE, [])
+    for n in all_notifs:
+        if n['id'] == notif_id:
+            n['read'] = True
+            break
+    save_json(NOTIFICATIONS_FILE, all_notifs)
+    return jsonify({{'status': 'success'}})
+
+# --- TELEMETRY ---
 
 @app.route('/api/telemetry', methods=['POST'])
 def receive_telemetry():
