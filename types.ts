@@ -74,6 +74,11 @@ export interface Device {
   resourceLimits?: ResourceLimits;
 }
 
+export interface WidgetConfig {
+  visible: boolean;
+  size: 'sm' | 'md' | 'lg'; // col-span-1, col-span-2, col-span-full
+}
+
 export interface AppSettings {
   accentColor: 'blue' | 'purple' | 'emerald' | 'amber' | 'rose' | 'indigo' | 'orange';
   compactMode: boolean;
@@ -125,6 +130,7 @@ export interface Notification {
   message: string;
   read: boolean;
   data?: any; // For action buttons like approving requests
+  timestamp: string;
 }
 
 export interface InviteCode {
@@ -144,6 +150,7 @@ export interface UpdateConfig {
   repoUrl: string;
   lastChecked: string;
   status: 'up-to-date' | 'update-available' | 'checking' | 'updating';
-  availableVersion?: string;
-  currentVersion: string;
+  localHash?: string;
+  remoteHash?: string;
+  currentVersion?: string;
 }
