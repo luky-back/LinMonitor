@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Device, AppSettings } from '../types';
-import { Shield, Key, Bell, Globe, ChevronDown, Check, Palette, LayoutTemplate } from 'lucide-react';
+import { Shield, Key, Bell, Globe, ChevronDown, Check, Palette, LayoutTemplate, CloudDownload } from 'lucide-react';
 import { translations } from '../translations';
 
 interface SettingsProps {
@@ -61,6 +61,13 @@ const Settings: React.FC<SettingsProps> = ({
     });
   };
 
+  const toggleSetting = (key: keyof AppSettings) => {
+      onSettingsChange({
+          ...settings,
+          [key]: !settings[key]
+      });
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-8 pb-20">
       <div>
@@ -103,7 +110,7 @@ const Settings: React.FC<SettingsProps> = ({
                     <p className="text-sm text-slate-500">{t.compactModeDesc || "Reduce padding."}</p>
                  </div>
                  <button 
-                    onClick={() => onSettingsChange({ ...settings, compactMode: !settings.compactMode })}
+                    onClick={() => toggleSetting('compactMode')}
                     className={`w-12 h-6 rounded-full relative transition-colors ${settings.compactMode ? 'bg-blue-600' : 'bg-slate-700'}`}
                  >
                     <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.compactMode ? 'left-7' : 'left-1'}`} />
@@ -131,6 +138,43 @@ const Settings: React.FC<SettingsProps> = ({
                        </label>
                     ))}
                  </div>
+              </div>
+           </div>
+        </section>
+
+        {/* Update & Notification Preferences */}
+        <section className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+           <div className="p-6 border-b border-slate-800 flex items-center gap-3 bg-slate-900">
+              <CloudDownload className="text-blue-500" size={24} />
+              <div>
+                 <h2 className="text-lg font-semibold text-white">Update & Notifications</h2>
+                 <p className="text-sm text-slate-400">Configure system updates.</p>
+              </div>
+           </div>
+           <div className="p-6 space-y-6">
+              <div className="flex items-center justify-between">
+                 <div>
+                    <h3 className="font-medium text-white">Auto-Update Devices</h3>
+                    <p className="text-sm text-slate-500">Automatically update connected devices when a new version is available.</p>
+                 </div>
+                 <button 
+                    onClick={() => toggleSetting('autoUpdateDevices')}
+                    className={`w-12 h-6 rounded-full relative transition-colors ${settings.autoUpdateDevices ? 'bg-emerald-600' : 'bg-slate-700'}`}
+                 >
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.autoUpdateDevices ? 'left-7' : 'left-1'}`} />
+                 </button>
+              </div>
+              <div className="flex items-center justify-between pt-4 border-t border-slate-800">
+                 <div>
+                    <h3 className="font-medium text-white">Update Popup</h3>
+                    <p className="text-sm text-slate-500">Show a popup notification when a system update is available.</p>
+                 </div>
+                 <button 
+                    onClick={() => toggleSetting('updateNotifications')}
+                    className={`w-12 h-6 rounded-full relative transition-colors ${settings.updateNotifications ? 'bg-emerald-600' : 'bg-slate-700'}`}
+                 >
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settings.updateNotifications ? 'left-7' : 'left-1'}`} />
+                 </button>
               </div>
            </div>
         </section>
