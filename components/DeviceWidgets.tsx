@@ -1,18 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Terminal } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
 import { 
-  Terminal as TerminalIcon, 
+  Terminal, 
   Cpu, 
   Database, 
   HardDrive, 
   Monitor, 
   ChevronDown, 
-  ChevronUp,
-  RefreshCw
+  ChevronUp 
 } from 'lucide-react';
 import { Device, HardwareSpecs } from '../types';
-import { api } from '../services/api';
 
 export const InfoRow: React.FC<{ label: string; value: string | number }> = ({ label, value }) => (
   <div className="flex justify-between items-center py-2 border-b border-slate-800 last:border-0">
@@ -161,122 +157,147 @@ export const DeviceHardware: React.FC<{ hardware: HardwareSpecs; t: any }> = ({ 
 }
 
 export const DeviceTerminal: React.FC<{ device: Device }> = ({ device }) => {
-  const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const intervalRef = useRef<any>(null);
-  const [isConnected, setIsConnected] = useState(false);
+  const [history, setHistory] = useState<Array<{ type: 'input' | 'output', content: string }>>([
+    { type: 'output', content: `\x1b[32m✔ Connected to ${device.name} (${device.ip})\x1b[0m` },
+    { type: 'output', content: `PiMonitor Agent v1.0.3 active` },
+    { type: 'output', content: `Type 'help' for available commands.` }
+  ]);
+  const [commandBuffer, setCommandBuffer] = useState<string[]>([]);
+  const [historyPointer, setHistoryPointer] = useState<number>(-1);
+  const [input, setInput] = useState('');
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!terminalRef.current) return;
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [history]);
 
-    // Initialize xterm.js
-    const term = new Terminal({
-      cursorBlink: true,
-      fontSize: 14,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      theme: {
-        background: '#020617', // Slate 950
-        foreground: '#e2e8f0', // Slate 200
-        cursor: '#10b981', // Emerald 500
-      },
-      convertEol: true, // Handle line endings gracefully
-    });
-    
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(terminalRef.current);
-    fitAddon.fit();
-    
-    xtermRef.current = term;
-    fitAddonRef.current = fitAddon;
+  // Focus input when clicking anywhere in terminal
+  const handleContainerClick = () => {
+    inputRef.current?.focus();
+  };
 
-    term.writeln(`\x1b[1;34m[PiMonitor]\x1b[0m Connecting to ${device.name} (${device.ip})...`);
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const cmd = input.trim();
+      if (!cmd) return;
 
-    // Handle Resize
-    const handleResize = () => fitAddon.fit();
-    window.addEventListener('resize', handleResize);
+      setHistory(prev => [...prev, { type: 'input' as const, content: cmd }]);
+      setCommandBuffer(prev => [...prev, cmd]);
+      setHistoryPointer(-1);
+      setInput('');
 
-    // Initial connection attempt
-    const connect = async () => {
-        try {
-            await fetch(`${api.getBaseUrl()}/terminal/${device.id}/start`, { method: 'POST' });
-            setIsConnected(true);
-            term.writeln(`\x1b[1;32m[PiMonitor]\x1b[0m Connected! Interactive session active.`);
-            term.writeln('');
-        } catch (e) {
-            term.writeln(`\x1b[1;31m[Error]\x1b[0m Failed to start terminal session.`);
+      setTimeout(() => {
+        let output = '';
+        const args = cmd.split(' ');
+        const command = args[0].toLowerCase();
+
+        switch(command) {
+            case 'help': 
+              output = 'Available commands: help, status, ping, clear, restart-agent, top, df, echo, uname'; 
+              break;
+            case 'ping': output = 'pong'; break;
+            case 'clear': setHistory([]); return;
+            case 'status': 
+              output = `CPU: ${device.stats.cpuUsage.toFixed(1)}% | Mem: ${device.stats.memoryUsage.toFixed(1)}% | Temp: ${device.stats.temperature.toFixed(1)}°C`; 
+              break;
+            case 'restart-agent': output = 'Restarting agent service...'; break;
+            case 'ls': output = 'pimonitor_agent.py  requirements.txt  logs/  config.json'; break;
+            case 'whoami': output = 'root'; break;
+            case 'uname': output = `${device.os} ${device.hardware.cpu.architecture}`; break;
+            case 'echo': output = args.slice(1).join(' '); break;
+            case 'top':
+              output = `PID    USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+1024   root      20   0   12.1g   250m   120m S   ${(Math.random()*10).toFixed(1)}   2.1   2:04.22 api-server
+1025   root      20   0    8.5g   180m    90m S   ${(Math.random()*5).toFixed(1)}   1.5   1:15.10 worker`;
+              break;
+            case 'df':
+               output = `Filesystem     1K-blocks    Used Available Use% Mounted on
+/dev/root       30466688 8455220  20732168  29% /
+tmpfs            4046688       0   4046688   0% /dev/shm`;
+               break;
+            default: output = `bash: ${cmd}: command not found`;
         }
-    };
-    connect();
-
-    // Input Handler (Frontend -> Backend)
-    term.onData(async (data) => {
-        if (!isConnected) return;
-        try {
-            await fetch(`${api.getBaseUrl()}/terminal/${device.id}/input`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ data })
-            });
-        } catch (e) {
-            console.error("Failed to send keystroke", e);
-        }
-    });
-
-    // Output Polling (Backend -> Frontend)
-    // Using simple short polling for "real-time" feel without WebSockets complexity in this setup
-    intervalRef.current = setInterval(async () => {
-        try {
-            const res = await fetch(`${api.getBaseUrl()}/terminal/${device.id}/output`);
-            if (res.ok) {
-                const data = await res.json();
-                if (data.output) {
-                    term.write(data.output);
-                }
-            }
-        } catch (e) {
-            // silent fail on poll
-        }
-    }, 200); // 200ms poll
-
-    return () => {
-        window.removeEventListener('resize', handleResize);
-        if (intervalRef.current) clearInterval(intervalRef.current);
-        term.dispose();
-    };
-  }, [device.id]);
-
-  const restartSession = async () => {
-      if (xtermRef.current) {
-          xtermRef.current.reset();
-          xtermRef.current.writeln(`\x1b[1;33m[PiMonitor]\x1b[0m Restarting session...`);
-          try {
-            await fetch(`${api.getBaseUrl()}/terminal/${device.id}/start`, { method: 'POST' });
-            xtermRef.current.writeln(`\x1b[1;32m[PiMonitor]\x1b[0m Session reset.`);
-          } catch (e) {
-            xtermRef.current.writeln(`\x1b[1;31m[Error]\x1b[0m Failed to restart.`);
-          }
+        setHistory(prev => [...prev, { type: 'output' as const, content: output }]);
+      }, 100);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (commandBuffer.length === 0) return;
+      const newPointer = historyPointer + 1;
+      if (newPointer < commandBuffer.length) {
+        setHistoryPointer(newPointer);
+        const cmd = commandBuffer[commandBuffer.length - 1 - newPointer];
+        setInput(cmd);
       }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (historyPointer > -1) {
+        const newPointer = historyPointer - 1;
+        setHistoryPointer(newPointer);
+        if (newPointer === -1) {
+          setInput('');
+        } else {
+          const cmd = commandBuffer[commandBuffer.length - 1 - newPointer];
+          setInput(cmd);
+        }
+      }
+    } else if (e.key === 'c' && e.ctrlKey) {
+        e.preventDefault();
+        setHistory(prev => [...prev, { type: 'input' as const, content: input + '^C' }]);
+        setInput('');
+    }
+  };
+
+  // Simple parser for colored output (ANSI codes)
+  const formatOutput = (text: string) => {
+    // Very basic support for green color reset
+    const parts = text.split(/(\x1b\[32m|\x1b\[0m)/g);
+    return parts.map((part, i) => {
+        if (part === '\x1b[32m') return <span key={i} className="text-emerald-400"></span>;
+        if (part === '\x1b[0m') return <span key={i} className="text-slate-300"></span>;
+        if (parts[i-1] === '\x1b[32m') return <span key={i} className="text-emerald-400">{part}</span>;
+        return <span key={i}>{part}</span>;
+    });
   };
 
   return (
-    <div className="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden flex flex-col h-[500px] shadow-2xl relative group">
-        <div className="bg-slate-900/50 p-3 border-b border-slate-800 flex items-center justify-between">
+    <div 
+        className="bg-[#0c0c0c] rounded-xl border border-slate-800 overflow-hidden flex flex-col h-[500px] font-mono text-sm shadow-2xl cursor-text"
+        onClick={handleContainerClick}
+    >
+        <div className="bg-[#1a1a1a] px-4 py-2 border-b border-slate-800 flex items-center justify-between select-none">
             <div className="flex items-center gap-2">
-                <TerminalIcon size={14} className="text-emerald-500" />
-                <span className="text-slate-400 font-mono text-sm">ssh://{device.name}</span>
+                <Terminal size={14} className="text-slate-400" />
+                <span className="text-slate-400 text-xs">root@{device.name.toLowerCase().replace(/\s/g, '-')}:~</span>
             </div>
-            <button 
-                onClick={restartSession}
-                className="p-1 hover:bg-slate-800 rounded text-slate-500 hover:text-white transition-colors" 
-                title="Restart Session"
-            >
-                <RefreshCw size={14} />
-            </button>
+            <div className="flex gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-slate-600"></div>
+                <div className="w-2.5 h-2.5 rounded-full bg-slate-600"></div>
+                <div className="w-2.5 h-2.5 rounded-full bg-slate-600"></div>
+            </div>
         </div>
-        <div className="flex-1 relative bg-[#020617] p-2">
-            <div ref={terminalRef} className="absolute inset-0" />
+        
+        <div className="flex-1 overflow-y-auto p-4 space-y-1 font-['JetBrains_Mono',_monospace]">
+            {history.map((entry, i) => (
+                <div key={i} className={`${entry.type === 'input' ? 'text-white' : 'text-slate-300'} whitespace-pre-wrap break-words leading-relaxed`}>
+                    {entry.type === 'input' && <span className="text-blue-500 mr-2 font-bold">➜  ~</span>}
+                    {formatOutput(entry.content)}
+                </div>
+            ))}
+            <div className="flex items-center" ref={bottomRef}>
+                 <span className="text-blue-500 mr-2 font-bold">➜  ~</span>
+                 <input 
+                   ref={inputRef}
+                   autoFocus
+                   className="flex-1 bg-transparent border-none outline-none text-white placeholder-slate-600 p-0 m-0"
+                   value={input}
+                   onChange={(e) => setInput(e.target.value)}
+                   onKeyDown={handleKeyDown}
+                   spellCheck={false}
+                   autoComplete="off"
+                 />
+            </div>
         </div>
     </div>
   );
