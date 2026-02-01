@@ -341,10 +341,6 @@ def monitor_local_system():
             pm2_procs = get_pm2_stats()
             now_str = datetime.now().strftime('%H:%M:%S')
             current_time = time.time()
-            
-            # Check for server pending updates (self-update)
-            # Not implemented in telemetry loop, handled by manual trigger route
-            
             if device_id not in devices_store:
                 devices_store[device_id] = {{
                     'id': device_id, 'name': 'Local Server', 'ip': '127.0.0.1',
@@ -491,8 +487,11 @@ def clear_all_notifications(user_id):
     save_json(NOTIFICATIONS_FILE, all_notifs)
     return jsonify({{'status': 'cleared'}})
 
-@app.route('/api/telemetry', methods=['POST'])
+@app.route('/api/telemetry', methods=['GET', 'POST'])
 def receive_telemetry():
+    if request.method == 'GET':
+        return jsonify({'status': 'active', 'message': 'Telemetry endpoint operational. Send POST data to update.'})
+
     try:
         data = request.json
         device_id = data.get('id')
@@ -666,9 +665,7 @@ def execute_update():
 
     def trigger():
         time.sleep(2)
-        # Pass the current PID so the updater can kill it
         subprocess.Popen([sys.executable, "update_script_A.py", repo_url, token, str(os.getpid())])
-        
     threading.Thread(target=trigger).start()
     return jsonify({{"status": "Update started"}})
 
