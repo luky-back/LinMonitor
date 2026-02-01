@@ -28,6 +28,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 SETTINGS_FILE = os.path.join(DATA_DIR, 'settings.json')
+INVITES_FILE = os.path.join(DATA_DIR, 'invites.json')
+MAIL_FILE = os.path.join(DATA_DIR, 'mail.json')
+NOTIF_FILE = os.path.join(DATA_DIR, 'notifications.json')
 DIST_DIR = os.path.join(BASE_DIR, 'dist')
 
 app = Flask(__name__, static_folder='dist', static_url_path='')
@@ -55,7 +58,7 @@ def save_json(filepath, data):
     ensure_data_dir()
     with open(filepath, 'w') as f: json.dump(data, f, indent=2)
 
-server_settings = load_json(SETTINGS_FILE, {{ "repoUrl": "", "localHash": "init" }})
+server_settings = load_json(SETTINGS_FILE, {{ "repoUrl": "https://github.com/user/repo", "localHash": "init" }})
 
 # --- UPDATER SYSTEM ---
 def create_updater_scripts():
@@ -165,40 +168,17 @@ def monitor_local_system():
                 "diskUsage": psutil.disk_usage('/').percent
             }}
             
-            # FULL HARDWARE INFO FOR FRONTEND STABILITY
             hw = {{
-                "cpu": {{ 
-                    "model": platform.processor() or "Unknown", 
-                    "cores": psutil.cpu_count() or 1, 
-                    "threads": psutil.cpu_count(logical=True) or 1,
-                    "baseSpeed": "N/A",
-                    "architecture": platform.machine() 
-                }},
-                "memory": {{ 
-                    "total": f"{{round(mem.total / (1024**3), 1)}} GB",
-                    "type": "RAM",
-                    "speed": "N/A",
-                    "formFactor": "N/A" 
-                }},
-                "gpu": {{
-                    "model": "N/A",
-                    "vram": "N/A",
-                    "driver": "N/A"
-                }},
+                "cpu": {{ "model": platform.processor() or "Unknown", "cores": psutil.cpu_count() or 1, "threads": psutil.cpu_count(logical=True) or 1, "baseSpeed": "N/A", "architecture": platform.machine() }},
+                "memory": {{ "total": f"{{round(mem.total / (1024**3), 1)}} GB", "type": "RAM", "speed": "N/A", "formFactor": "N/A" }},
+                "gpu": {{ "model": "N/A", "vram": "N/A", "driver": "N/A" }},
                 "storage": []
             }}
             try:
                 for part in psutil.disk_partitions(all=False):
                     try:
                          usage = psutil.disk_usage(part.mountpoint)
-                         hw['storage'].append({{
-                             "name": part.device,
-                             "model": "Generic",
-                             "size": f"{{round(usage.total / (1024**3), 1)}} GB",
-                             "type": part.fstype,
-                             "interface": part.mountpoint,
-                             "usage": usage.percent
-                         }})
+                         hw['storage'].append({{ "name": part.device, "model": "Generic", "size": f"{{round(usage.total / (1024**3), 1)}} GB", "type": part.fstype, "interface": part.mountpoint, "usage": usage.percent }})
                     except: pass
             except: pass
 
@@ -222,6 +202,7 @@ def monitor_local_system():
 
         except Exception as e: print(f"Monitor error: {{e}}"); time.sleep(1)
 
+# --- AUTH ENDPOINTS ---
 @app.route('/api/auth/check', methods=['GET'])
 def check_setup():
     return jsonify({{'setupRequired': len(load_json(USERS_FILE, [])) == 0}})
@@ -243,6 +224,108 @@ def login():
     if user: return jsonify(user)
     return jsonify({{'error': 'Invalid credentials'}}), 401
 
+@app.route('/api/auth/register', methods=['POST'])
+def register():
+    data = request.json
+    invites = load_json(INVITES_FILE, [])
+    code = data.get('code')
+    valid = next((i for i in invites if i['code'] == code), None)
+    
+    if not valid: return jsonify({{'error': 'Invalid code'}}), 400
+    if valid['expiresAt'] < time.time() * 1000: return jsonify({{'error': 'Code expired'}}), 400
+    
+    users = load_json(USERS_FILE, [])
+    new_user = {{ 'id': str(uuid.uuid4()), 'username': data['username'], 'password': data['password'], 'role': valid['role'], 'joinedAt': datetime.now().isoformat() }}
+    users.append(new_user)
+    save_json(USERS_FILE, users)
+    return jsonify(new_user)
+
+# --- USER & INVITE ENDPOINTS ---
+@app.route('/api/users', methods=['GET'])
+def get_users():
+    return jsonify(load_json(USERS_FILE, []))
+
+@app.route('/api/invites', methods=['GET', 'POST'])
+def manage_invites():
+    invites = load_json(INVITES_FILE, [])
+    if request.method == 'GET': return jsonify(invites)
+    data = request.json
+    new_invite = {{ 
+        'code': str(uuid.uuid4())[:6].upper(), 
+        'role': data.get('role', 'Guest'), 
+        'createdBy': data.get('createdBy'),
+        'expiresAt': (time.time() + 86400) * 1000 
+    }}
+    invites.append(new_invite)
+    save_json(INVITES_FILE, invites)
+    return jsonify(new_invite)
+
+@app.route('/api/invites/<code_id>', methods=['DELETE'])
+def delete_invite(code_id):
+    invites = load_json(INVITES_FILE, [])
+    invites = [i for i in invites if i['code'] != code_id]
+    save_json(INVITES_FILE, invites)
+    return jsonify({{'status': 'ok'}})
+
+# --- MAIL & NOTIF ENDPOINTS ---
+@app.route('/api/mail/<user_id>', methods=['GET'])
+def get_mail(user_id):
+    all_mail = load_json(MAIL_FILE, [])
+    return jsonify([m for m in all_mail if m['toId'] == user_id])
+
+@app.route('/api/mail', methods=['POST'])
+def send_mail():
+    data = request.json
+    all_mail = load_json(MAIL_FILE, [])
+    new_mail = {{ 
+        'id': str(uuid.uuid4()), 'fromId': data['fromId'], 'toId': data['toId'], 
+        'subject': data['subject'], 'body': data['body'], 'read': False, 
+        'timestamp': datetime.now().isoformat() 
+    }}
+    all_mail.append(new_mail)
+    save_json(MAIL_FILE, all_mail)
+    return jsonify(new_mail)
+
+@app.route('/api/mail/<mail_id>', methods=['DELETE'])
+def delete_mail(mail_id):
+    all_mail = load_json(MAIL_FILE, [])
+    save_json(MAIL_FILE, [m for m in all_mail if m['id'] != mail_id])
+    return jsonify({{'status': 'ok'}})
+
+@app.route('/api/mail/<user_id>/read-all', methods=['PUT'])
+def read_all_mail(user_id):
+    all_mail = load_json(MAIL_FILE, [])
+    for m in all_mail:
+        if m['toId'] == user_id: m['read'] = True
+    save_json(MAIL_FILE, all_mail)
+    return jsonify({{'status': 'ok'}})
+
+@app.route('/api/notifications/<user_id>', methods=['GET'])
+def get_notifs(user_id):
+    return jsonify([n for n in load_json(NOTIF_FILE, []) if n['userId'] == user_id])
+
+@app.route('/api/notifications/<notif_id>', methods=['DELETE'])
+def delete_notif(notif_id):
+    all_n = load_json(NOTIF_FILE, [])
+    save_json(NOTIF_FILE, [n for n in all_n if n['id'] != notif_id])
+    return jsonify({{'status': 'ok'}})
+
+@app.route('/api/notifications/<user_id>/clear', methods=['DELETE'])
+def clear_notifs(user_id):
+    all_n = load_json(NOTIF_FILE, [])
+    save_json(NOTIF_FILE, [n for n in all_n if n['userId'] != user_id])
+    return jsonify({{'status': 'ok'}})
+
+# --- SETTINGS ENDPOINT ---
+@app.route('/api/settings', methods=['POST'])
+def update_settings():
+    data = request.json
+    if 'repoUrl' in data: server_settings['repoUrl'] = data['repoUrl']
+    if 'githubToken' in data and data['githubToken']: server_settings['githubToken'] = data['githubToken']
+    save_json(SETTINGS_FILE, server_settings)
+    return jsonify({{'status': 'ok'}})
+
+# --- DEVICE & TELEMETRY ---
 @app.route('/api/devices', methods=['GET'])
 def get_devices():
     results = []
@@ -295,6 +378,7 @@ def receive_telemetry():
         return jsonify(resp)
     except Exception as e: return jsonify({{'error': str(e)}}), 500
 
+# --- UPDATE ---
 @app.route('/api/update/check', methods=['GET'])
 def check_update():
     global update_cache
@@ -327,7 +411,6 @@ def execute_update():
 
 @app.route('/api/system/power', methods=['POST'])
 def power_ops():
-    # Placeholder for server power ops
     return jsonify({{'status': 'Simulated Server Power Action'}})
 
 @app.route('/')
