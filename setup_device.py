@@ -27,77 +27,11 @@ def test_connection(url):
 
 def generate_agent_script(server_url):
     endpoint = f"{server_url}/api/telemetry"
-    term_endpoint = f"{server_url}/api/terminal/sync"
-    script = f"""import requests, psutil, time, json, platform, socket, subprocess, threading, os, sys, select
+    script = f"""import requests, psutil, time, json, platform, socket, subprocess, threading, os, sys
 
 API_ENDPOINT = "{endpoint}"
-TERM_ENDPOINT = "{term_endpoint}"
 DEVICE_NAME = socket.gethostname()
 DEVICE_ID = f"{{socket.gethostname()}}-{{platform.machine()}}"
-
-# Terminal State
-term_active = False
-term_fd = None
-term_proc = None
-term_output_buffer = []
-term_lock = threading.Lock()
-
-try:
-    import pty
-    HAS_PTY = True
-except ImportError:
-    HAS_PTY = False
-
-def terminal_worker():
-    global term_active, term_fd, term_proc
-    while True:
-        try:
-            # Sync with server
-            out_chunk = ''
-            with term_lock:
-                if term_output_buffer:
-                    out_chunk = ''.join(term_output_buffer)
-                    term_output_buffer.clear()
-            
-            # If we have data to send OR just need to poll for input
-            if out_chunk or term_active:
-                try:
-                    r = requests.post(TERM_ENDPOINT, json={{'id': DEVICE_ID, 'output': out_chunk}}, timeout=1)
-                    if r.status_code == 200:
-                        data = r.json()
-                        input_data = data.get('input', '')
-                        
-                        # Start shell if input received and not active
-                        if input_data and not term_active:
-                             if HAS_PTY:
-                                 master, slave = pty.openpty()
-                                 shell = os.environ.get('SHELL', 'bash')
-                                 term_proc = subprocess.Popen([shell], stdin=slave, stdout=slave, stderr=slave, preexec_fn=os.setsid)
-                                 term_fd = master
-                                 term_active = True
-                                 os.write(term_fd, input_data.encode('utf-8'))
-                             else:
-                                 pass # Windows fallback unimplemented for brevity, effectively read-only or unsupported
-                        elif input_data and term_active:
-                             if term_fd: os.write(term_fd, input_data.encode('utf-8'))
-                except: pass
-            
-            # Read from local PTY
-            if term_active and term_fd:
-                r, _, _ = select.select([term_fd], [], [], 0.05)
-                if term_fd in r:
-                    try:
-                        data = os.read(term_fd, 1024)
-                        if data:
-                            with term_lock:
-                                term_output_buffer.append(data.decode('utf-8', errors='replace'))
-                        else:
-                            # EOF
-                            term_active = False
-                    except: term_active = False
-
-        except Exception as e: print(e)
-        time.sleep(0.1)
 
 def execute_power_command(cmd):
     try:
@@ -136,7 +70,6 @@ def get_pm2_stats():
 
 def main():
     hw = get_hardware_info()
-    threading.Thread(target=terminal_worker, daemon=True).start()
     while True:
         try:
             mem = psutil.virtual_memory()
