@@ -17,17 +17,10 @@ def install_dependencies():
 
 def generate_server_script(port):
     code = f"""
-import time, os, json, threading, requests, zipfile, io, shutil, sys, uuid, socket, psutil, platform, subprocess, signal, select
+import time, os, json, threading, requests, zipfile, io, shutil, sys, uuid, socket, psutil, platform, subprocess, signal
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from datetime import datetime
-
-# Check for PTY support (Linux/Mac)
-try:
-    import pty
-    HAS_PTY = True
-except ImportError:
-    HAS_PTY = False
 
 PORT = {port}
 MAX_HISTORY = 50
@@ -46,12 +39,6 @@ CORS(app, resources={{r"/*": {{"origins": "*"}}}})
 devices_store = {{}}
 pending_updates = {{}}
 pending_commands = {{}}
-
-# Terminal Session Store
-# For Local Server: {{ 'type': 'local', 'fd': master_fd, 'proc': subprocess, 'output': deque() }}
-# For Remote: {{ 'type': 'remote', 'input_buffer': [], 'output_buffer': [] }}
-terminal_sessions = {{}}
-terminal_lock = threading.Lock()
 
 update_cache = {{
     "last_check": 0, "status": "up-to-date", "remote_hash": None, "changed_files": [], "error": None
@@ -72,32 +59,6 @@ def save_json(filepath, data):
     with open(filepath, 'w') as f: json.dump(data, f, indent=2)
 
 server_settings = load_json(SETTINGS_FILE, {{ "repoUrl": "https://github.com/user/repo", "localHash": "init" }})
-
-# --- PTY MANAGER (Local Server) ---
-def local_pty_reader(device_id):
-    # Reads from master_fd and puts into output buffer
-    if device_id not in terminal_sessions: return
-    session = terminal_sessions[device_id]
-    fd = session['fd']
-    while True:
-        try:
-            if session['proc'].poll() is not None: break
-            r, _, _ = select.select([fd], [], [], 0.1)
-            if fd in r:
-                data = os.read(fd, 1024)
-                if not data: break
-                # Decode for JSON safety (utf-8, replace errors)
-                text = data.decode('utf-8', errors='replace')
-                with terminal_lock:
-                    session['output_buffer'].append(text)
-        except: break
-    
-    # Cleanup
-    with terminal_lock:
-        if device_id in terminal_sessions:
-            try: os.close(fd)
-            except: pass
-            del terminal_sessions[device_id]
 
 # --- UPDATER SYSTEM ---
 def create_updater_scripts():
@@ -240,82 +201,6 @@ def monitor_local_system():
                     dev['history']['network'] = dev['history']['network'][-MAX_HISTORY:]
 
         except Exception as e: print(f"Monitor error: {{e}}"); time.sleep(1)
-
-# --- TERMINAL ENDPOINTS ---
-@app.route('/api/terminal/<device_id>/start', methods=['POST'])
-def term_start(device_id):
-    with terminal_lock:
-        # Cleanup existing
-        if device_id in terminal_sessions:
-            if terminal_sessions[device_id]['type'] == 'local':
-                 try: os.close(terminal_sessions[device_id]['fd']); terminal_sessions[device_id]['proc'].kill()
-                 except: pass
-            del terminal_sessions[device_id]
-
-        if device_id == 'server-local' and HAS_PTY:
-            # Start local PTY
-            master, slave = pty.openpty()
-            shell = os.environ.get('SHELL', 'bash')
-            p = subprocess.Popen([shell], stdin=slave, stdout=slave, stderr=slave, preexec_fn=os.setsid)
-            terminal_sessions[device_id] = {{ 'type': 'local', 'fd': master, 'proc': p, 'output_buffer': [] }}
-            threading.Thread(target=local_pty_reader, args=(device_id,), daemon=True).start()
-            return jsonify({{'status': 'started', 'mode': 'local'}})
-        else:
-            # Init remote buffer
-            terminal_sessions[device_id] = {{ 'type': 'remote', 'input_buffer': [], 'output_buffer': [], 'last_active': time.time() }}
-            return jsonify({{'status': 'started', 'mode': 'remote'}})
-
-@app.route('/api/terminal/<device_id>/input', methods=['POST'])
-def term_input(device_id):
-    data = request.json.get('data', '')
-    with terminal_lock:
-        if device_id in terminal_sessions:
-            session = terminal_sessions[device_id]
-            if session['type'] == 'local':
-                try: os.write(session['fd'], data.encode('utf-8'))
-                except: pass
-            else:
-                session['input_buffer'].append(data)
-                session['last_active'] = time.time()
-    return jsonify({{'status': 'ok'}})
-
-@app.route('/api/terminal/<device_id>/output', methods=['GET'])
-def term_output(device_id):
-    output = ''
-    with terminal_lock:
-        if device_id in terminal_sessions:
-            session = terminal_sessions[device_id]
-            if session['type'] == 'local':
-                if session['output_buffer']:
-                    output = ''.join(session['output_buffer'])
-                    session['output_buffer'] = []
-            else:
-                if session['output_buffer']:
-                    output = ''.join(session['output_buffer'])
-                    session['output_buffer'] = []
-    return jsonify({{'output': output}})
-
-@app.route('/api/terminal/sync', methods=['POST'])
-def term_sync():
-    # Called by REMOTE DEVICE
-    data = request.json
-    d_id = data.get('id')
-    dev_output = data.get('output', '')
-    
-    response_input = ''
-    with terminal_lock:
-        if d_id in terminal_sessions and terminal_sessions[d_id]['type'] == 'remote':
-            session = terminal_sessions[d_id]
-            # Append device output to browser buffer
-            if dev_output:
-                session['output_buffer'].append(dev_output)
-            # Send browser input to device
-            if session['input_buffer']:
-                response_input = ''.join(session['input_buffer'])
-                session['input_buffer'] = []
-            session['last_active'] = time.time()
-    
-    return jsonify({{'input': response_input}})
 
 # --- AUTH ENDPOINTS ---
 @app.route('/api/auth/check', methods=['GET'])
@@ -546,7 +431,7 @@ if __name__ == '__main__':
     except: pass
     print(f"Server on {{PORT}} | IPs: {{', '.join(ips)}}")
     threading.Thread(target=monitor_local_system, daemon=True).start()
-    app.run(host='0.0.0.0', port=PORT, threaded=True)
+    app.run(host='0.0.0.0', port=PORT)
 """
     with open("pimonitor_server.py", "w", encoding="utf-8") as f: f.write(code)
     return "pimonitor_server.py"
