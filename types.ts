@@ -154,4 +154,5 @@ export interface UpdateConfig {
   remoteHash?: string;
   currentVersion?: string;
   error?: string;
+  githubToken?: string;
 }
