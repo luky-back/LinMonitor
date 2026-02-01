@@ -10,7 +10,7 @@ import MailPage from './pages/Mail';
 import UsersPage from './pages/Users';
 import { Device, AppSettings, ProcessAction, User, Mail, Notification, InviteCode, ResourceLimits, UserRole, UpdateConfig } from './types';
 import { api } from './services/api';
-import { WifiOff, RefreshCw, Server as ServerIcon, AlertTriangle } from 'lucide-react';
+import { WifiOff, RefreshCw, Server as ServerIcon, AlertTriangle, CloudDownload, Clock, CheckCircle } from 'lucide-react';
 
 const App: React.FC = () => {
   // --- STATE ---
@@ -28,7 +28,9 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>({
     accentColor: 'blue',
     compactMode: false,
-    visibleWidgets: { activeDevices: true, cpu: true, memory: true, processes: true }
+    visibleWidgets: { activeDevices: true, cpu: true, memory: true, processes: true },
+    autoUpdateDevices: false,
+    updateNotifications: true
   });
   
   const [updateConfig, setUpdateConfig] = useState<UpdateConfig>({
@@ -36,6 +38,7 @@ const App: React.FC = () => {
     lastChecked: 'Never',
     status: 'up-to-date',
     currentVersion: 'v1.0.0',
+    changedFiles: []
   });
 
   const [users, setUsers] = useState<User[]>([]);
@@ -46,6 +49,10 @@ const App: React.FC = () => {
 
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'setup'>('login');
   const [authError, setAuthError] = useState<string>('');
+
+  // Update Notification Logic
+  const [showUpdatePopup, setShowUpdatePopup] = useState(false);
+  const [updateTimer, setUpdateTimer] = useState<number | null>(null);
 
   // --- INITIALIZATION ---
   const initSystem = async () => {
@@ -136,16 +143,38 @@ const App: React.FC = () => {
        try {
          const updateStatus = await api.getUpdateStatus();
          setUpdateConfig(prev => ({...prev, ...updateStatus}));
+         
+         // Trigger popup if setting enabled and new update found
+         if (settings.updateNotifications && updateStatus.status === 'update-available' && !showUpdatePopup && !updateTimer) {
+             setShowUpdatePopup(true);
+         }
        } catch (e) {
          console.error("Update check failed", e);
        }
     };
     
     fetchUpdates();
-    // Check every 1 second
-    const interval = setInterval(fetchUpdates, 1000); 
+    // Check every 60 seconds (backend caches for 60s anyway)
+    const interval = setInterval(fetchUpdates, 60000); 
     return () => clearInterval(interval);
-  }, [currentUser, connectionError]);
+  }, [currentUser, connectionError, settings.updateNotifications]);
+
+  // Timer Effect
+  useEffect(() => {
+      let interval: any;
+      if (updateTimer !== null && updateTimer > 0) {
+          interval = setInterval(() => {
+              setUpdateTimer(prev => (prev && prev > 0 ? prev - 1 : 0));
+          }, 1000);
+      } else if (updateTimer === 0) {
+          // Trigger update
+          api.triggerUpdate();
+          setShowUpdatePopup(false);
+          // Wait 2 seconds then clear timer
+          setTimeout(() => setUpdateTimer(null), 2000);
+      }
+      return () => clearInterval(interval);
+  }, [updateTimer]);
 
   // --- ACTIONS ---
   const handleSetupOwner = async (username: string, passwordHash: string) => {
@@ -240,6 +269,17 @@ const App: React.FC = () => {
   
   const handleTriggerUpdate = async () => { await api.triggerUpdate(); };
 
+  const startUpdateTimer = () => {
+      setUpdateTimer(120); // 120 seconds
+      setShowUpdatePopup(false);
+  };
+
+  const formatTime = (sec: number) => {
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
   // --- RENDER ---
   
   // 1. Loading State
@@ -328,6 +368,10 @@ const App: React.FC = () => {
            await api.markNotificationRead(id);
            setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
         }}
+        onDeleteNotification={async (id) => {
+           await api.deleteNotification(id);
+           setNotifications(prev => prev.filter(n => n.id !== id));
+        }}
       >
         <Routes>
           <Route path="/" element={<Home devices={devices} language={language} settings={settings} />} />
@@ -375,6 +419,71 @@ const App: React.FC = () => {
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+
+        {/* Global Update Popup */}
+        {showUpdatePopup && (
+            <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-6 duration-300">
+                <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-5 w-80 max-w-sm relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-indigo-500"></div>
+                    <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                            <CloudDownload size={20} className="text-blue-400" />
+                            <h3 className="font-bold text-white">Update Available</h3>
+                        </div>
+                        <button onClick={() => setShowUpdatePopup(false)} className="text-slate-500 hover:text-white transition-colors"><AlertTriangle size={14} className="rotate-180" /></button>
+                    </div>
+                    <p className="text-sm text-slate-400 mb-3">A new version is available for the server.</p>
+                    
+                    {/* Changed Files List */}
+                    <div className="bg-slate-950 rounded-lg p-3 mb-4 max-h-24 overflow-y-auto border border-slate-800 text-xs font-mono">
+                        <div className="text-slate-500 mb-1 border-b border-slate-800 pb-1">Changed Files ({updateConfig.changedFiles?.length || 0}):</div>
+                        {updateConfig.changedFiles?.length ? (
+                            updateConfig.changedFiles.map((file, i) => (
+                                <div key={i} className="text-slate-300 truncate">• {file}</div>
+                            ))
+                        ) : (
+                            <div className="text-slate-600 italic">No file details</div>
+                        )}
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                        <button 
+                            onClick={handleTriggerUpdate}
+                            className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium text-sm transition-colors shadow-lg shadow-blue-900/20"
+                        >
+                            Update Now
+                        </button>
+                        <div className="flex gap-2">
+                            <button 
+                                onClick={startUpdateTimer}
+                                className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-medium text-xs transition-colors flex items-center justify-center gap-1"
+                            >
+                                <Clock size={12} /> In 2 min
+                            </button>
+                            <button 
+                                onClick={() => setShowUpdatePopup(false)}
+                                className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-medium text-xs transition-colors"
+                            >
+                                Later
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* Global Timer Overlay */}
+        {updateTimer !== null && (
+            <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 transition-all duration-500 ${updateTimer === 0 ? 'translate-y-0 opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}>
+                <div className="bg-slate-900/90 backdrop-blur border border-blue-500/30 rounded-full px-4 py-2 shadow-xl flex items-center gap-3">
+                    <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+                    <span className="text-sm font-medium text-white flex items-center gap-2">
+                        System Updating in <span className="font-mono text-blue-400 w-10 text-center">{formatTime(updateTimer)}</span>
+                    </span>
+                    <button onClick={() => setUpdateTimer(null)} className="text-slate-500 hover:text-white ml-2"><AlertTriangle size={14} className="rotate-45" /></button>
+                </div>
+            </div>
+        )}
       </Layout>
     </Router>
   );
