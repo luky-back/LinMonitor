@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Terminal as XTerm } from 'xterm';
+import { FitAddon } from 'xterm-addon-fit';
 import { 
-  Terminal, 
   Cpu, 
   Database, 
   HardDrive, 
@@ -157,119 +158,114 @@ export const DeviceHardware: React.FC<{ hardware: HardwareSpecs; t: any }> = ({ 
 }
 
 export const DeviceTerminal: React.FC<{ device: Device }> = ({ device }) => {
-  const [history, setHistory] = useState<Array<{ type: 'input' | 'output', content: string }>>([
-    { type: 'output', content: `\x1b[32m✔ Connected to ${device.name} (${device.ip})\x1b[0m` },
-    { type: 'output', content: `PiMonitor Agent v1.0.3 active` },
-    { type: 'output', content: `Type 'help' for available commands.` }
-  ]);
-  const [commandBuffer, setCommandBuffer] = useState<string[]>([]);
-  const [historyPointer, setHistoryPointer] = useState<number>(-1);
-  const [input, setInput] = useState('');
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const terminalRef = useRef<HTMLDivElement>(null);
+  const xtermRef = useRef<XTerm | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [history]);
+    if (!terminalRef.current) return;
 
-  // Focus input when clicking anywhere in terminal
-  const handleContainerClick = () => {
-    inputRef.current?.focus();
-  };
+    // Initialize XTerm
+    const term = new XTerm({
+      cursorBlink: true,
+      fontFamily: 'JetBrains Mono, monospace',
+      fontSize: 14,
+      theme: {
+        background: '#0c0c0c',
+        foreground: '#f1f5f9',
+        cursor: '#3b82f6',
+        selectionBackground: 'rgba(59, 130, 246, 0.3)',
+      },
+      convertEol: true, // Treat \n as \r\n
+    });
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const cmd = input.trim();
-      if (!cmd) return;
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    
+    term.open(terminalRef.current);
+    fitAddon.fit();
 
-      setHistory(prev => [...prev, { type: 'input' as const, content: cmd }]);
-      setCommandBuffer(prev => [...prev, cmd]);
-      setHistoryPointer(-1);
-      setInput('');
+    xtermRef.current = term;
+    fitAddonRef.current = fitAddon;
 
-      setTimeout(() => {
-        let output = '';
-        const args = cmd.split(' ');
-        const command = args[0].toLowerCase();
+    // Welcome Message
+    term.writeln('\x1b[32m✔ Connected to ' + device.name + ' (' + device.ip + ')\x1b[0m');
+    term.writeln('PiMonitor Agent v1.0.3 active');
+    term.writeln("Type 'help' for available commands.");
+    term.write('\r\n$ ');
 
-        switch(command) {
-            case 'help': 
-              output = 'Available commands: help, status, ping, clear, restart-agent, top, df, echo, uname'; 
-              break;
-            case 'ping': output = 'pong'; break;
-            case 'clear': setHistory([]); return;
-            case 'status': 
-              output = `CPU: ${device.stats.cpuUsage.toFixed(1)}% | Mem: ${device.stats.memoryUsage.toFixed(1)}% | Temp: ${device.stats.temperature.toFixed(1)}°C`; 
-              break;
-            case 'restart-agent': output = 'Restarting agent service...'; break;
-            case 'ls': output = 'pimonitor_agent.py  requirements.txt  logs/  config.json'; break;
-            case 'whoami': output = 'root'; break;
-            case 'uname': output = `${device.os} ${device.hardware.cpu.architecture}`; break;
-            case 'echo': output = args.slice(1).join(' '); break;
-            case 'top':
-              output = `PID    USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
-1024   root      20   0   12.1g   250m   120m S   ${(Math.random()*10).toFixed(1)}   2.1   2:04.22 api-server
-1025   root      20   0    8.5g   180m    90m S   ${(Math.random()*5).toFixed(1)}   1.5   1:15.10 worker`;
-              break;
-            case 'df':
-               output = `Filesystem     1K-blocks    Used Available Use% Mounted on
-/dev/root       30466688 8455220  20732168  29% /
-tmpfs            4046688       0   4046688   0% /dev/shm`;
-               break;
-            default: output = `bash: ${cmd}: command not found`;
-        }
-        setHistory(prev => [...prev, { type: 'output' as const, content: output }]);
-      }, 100);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (commandBuffer.length === 0) return;
-      const newPointer = historyPointer + 1;
-      if (newPointer < commandBuffer.length) {
-        setHistoryPointer(newPointer);
-        const cmd = commandBuffer[commandBuffer.length - 1 - newPointer];
-        setInput(cmd);
+    let commandBuffer = '';
+
+    term.onData(e => {
+      switch (e) {
+        case '\r': // Enter
+          term.write('\r\n');
+          processCommand(commandBuffer, term, device);
+          commandBuffer = '';
+          term.write('$ ');
+          break;
+        case '\u007F': // Backspace
+          if (commandBuffer.length > 0) {
+            term.write('\b \b');
+            commandBuffer = commandBuffer.slice(0, -1);
+          }
+          break;
+        default:
+          if (e >= String.fromCharCode(0x20) && e <= String.fromCharCode(0x7E)) {
+             commandBuffer += e;
+             term.write(e);
+          }
       }
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (historyPointer > -1) {
-        const newPointer = historyPointer - 1;
-        setHistoryPointer(newPointer);
-        if (newPointer === -1) {
-          setInput('');
-        } else {
-          const cmd = commandBuffer[commandBuffer.length - 1 - newPointer];
-          setInput(cmd);
-        }
-      }
-    } else if (e.key === 'c' && e.ctrlKey) {
-        e.preventDefault();
-        setHistory(prev => [...prev, { type: 'input' as const, content: input + '^C' }]);
-        setInput('');
+    });
+
+    const handleResize = () => fitAddon.fit();
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      term.dispose();
+    };
+  }, [device]);
+
+  const processCommand = (cmd: string, term: XTerm, device: Device) => {
+    const trimmed = cmd.trim();
+    if (!trimmed) return;
+    const args = trimmed.split(' ');
+    const command = args[0].toLowerCase();
+
+    switch(command) {
+        case 'help': 
+          term.writeln('Available commands: help, status, ping, clear, restart-agent, top, df, echo, uname'); 
+          break;
+        case 'ping': term.writeln('pong'); break;
+        case 'clear': term.clear(); break;
+        case 'status': 
+          term.writeln(`CPU: ${device.stats.cpuUsage.toFixed(1)}% | Mem: ${device.stats.memoryUsage.toFixed(1)}% | Temp: ${device.stats.temperature.toFixed(1)}°C`); 
+          break;
+        case 'restart-agent': term.writeln('Restarting agent service...'); break;
+        case 'ls': term.writeln('pimonitor_agent.py  requirements.txt  logs/  config.json'); break;
+        case 'whoami': term.writeln('root'); break;
+        case 'uname': term.writeln(`${device.os} ${device.hardware.cpu.architecture}`); break;
+        case 'echo': term.writeln(args.slice(1).join(' ')); break;
+        case 'top':
+          term.writeln(`PID    USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND`);
+          term.writeln(`1024   root      20   0   12.1g   250m   120m S   ${(Math.random()*10).toFixed(1)}   2.1   2:04.22 api-server`);
+          term.writeln(`1025   root      20   0    8.5g   180m    90m S   ${(Math.random()*5).toFixed(1)}   1.5   1:15.10 worker`);
+          break;
+        case 'df':
+           term.writeln(`Filesystem     1K-blocks    Used Available Use% Mounted on`);
+           term.writeln(`/dev/root       30466688 8455220  20732168  29% /`);
+           term.writeln(`tmpfs            4046688       0   4046688   0% /dev/shm`);
+           break;
+        default: term.writeln(`bash: ${cmd}: command not found`);
     }
   };
 
-  // Simple parser for colored output (ANSI codes)
-  const formatOutput = (text: string) => {
-    // Very basic support for green color reset
-    const parts = text.split(/(\x1b\[32m|\x1b\[0m)/g);
-    return parts.map((part, i) => {
-        if (part === '\x1b[32m') return <span key={i} className="text-emerald-400"></span>;
-        if (part === '\x1b[0m') return <span key={i} className="text-slate-300"></span>;
-        if (parts[i-1] === '\x1b[32m') return <span key={i} className="text-emerald-400">{part}</span>;
-        return <span key={i}>{part}</span>;
-    });
-  };
-
   return (
-    <div 
-        className="bg-[#0c0c0c] rounded-xl border border-slate-800 overflow-hidden flex flex-col h-[500px] font-mono text-sm shadow-2xl cursor-text"
-        onClick={handleContainerClick}
-    >
+    <div className="bg-[#0c0c0c] rounded-xl border border-slate-800 overflow-hidden flex flex-col h-[500px] shadow-2xl">
         <div className="bg-[#1a1a1a] px-4 py-2 border-b border-slate-800 flex items-center justify-between select-none">
             <div className="flex items-center gap-2">
-                <Terminal size={14} className="text-slate-400" />
-                <span className="text-slate-400 text-xs">root@{device.name.toLowerCase().replace(/\s/g, '-')}:~</span>
+                <div className="text-slate-400 text-xs">root@{device.name.toLowerCase().replace(/\s/g, '-')}:~</div>
             </div>
             <div className="flex gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-full bg-slate-600"></div>
@@ -277,27 +273,8 @@ tmpfs            4046688       0   4046688   0% /dev/shm`;
                 <div className="w-2.5 h-2.5 rounded-full bg-slate-600"></div>
             </div>
         </div>
-        
-        <div className="flex-1 overflow-y-auto p-4 space-y-1 font-['JetBrains_Mono',_monospace]">
-            {history.map((entry, i) => (
-                <div key={i} className={`${entry.type === 'input' ? 'text-white' : 'text-slate-300'} whitespace-pre-wrap break-words leading-relaxed`}>
-                    {entry.type === 'input' && <span className="text-blue-500 mr-2 font-bold">➜  ~</span>}
-                    {formatOutput(entry.content)}
-                </div>
-            ))}
-            <div className="flex items-center" ref={bottomRef}>
-                 <span className="text-blue-500 mr-2 font-bold">➜  ~</span>
-                 <input 
-                   ref={inputRef}
-                   autoFocus
-                   className="flex-1 bg-transparent border-none outline-none text-white placeholder-slate-600 p-0 m-0"
-                   value={input}
-                   onChange={(e) => setInput(e.target.value)}
-                   onKeyDown={handleKeyDown}
-                   spellCheck={false}
-                   autoComplete="off"
-                 />
-            </div>
+        <div className="flex-1 relative">
+            <div ref={terminalRef} className="absolute inset-0 p-2" />
         </div>
     </div>
   );
