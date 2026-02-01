@@ -490,7 +490,7 @@ def clear_all_notifications(user_id):
 @app.route('/api/telemetry', methods=['GET', 'POST'])
 def receive_telemetry():
     if request.method == 'GET':
-        return jsonify({'status': 'active', 'message': 'Telemetry endpoint operational. Send POST data to update.'})
+        return jsonify({{'status': 'active', 'message': 'Telemetry endpoint operational. Send POST data to update.'}})
 
     try:
         data = request.json
