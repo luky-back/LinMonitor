@@ -604,11 +604,65 @@ def power_ops():
         return jsonify({{'status': 'Shutting down...'}})
     elif action == 'restart':
         def do_restart():
-            time.sleep(1)
-            if os.name == 'nt': os.system('shutdown /r /t 0')
-            else: os.system('reboot')
+            # Create a self-restarting mechanism
+            # We create a temporary script 'restarter.py' that waits for this PID to die, then starts the server again
+            restarter_code = \"\"\"
+import os
+import sys
+import time
+import subprocess
+
+pid = int(sys.argv[1])
+cmd = sys.argv[2:]
+
+print(f"Restarter: Waiting for PID {{pid}} to exit...")
+try:
+    while True:
+        try:
+            os.kill(pid, 0)
+            time.sleep(0.5)
+        except OSError:
+            break
+except:
+    pass
+
+print("Restarter: Launching server...")
+# Launch the server detached
+if os.name == 'nt':
+    subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+else:
+    subprocess.Popen(cmd, start_new_session=True)
+
+# Self-delete (best effort)
+try:
+    os.remove(sys.argv[0])
+except:
+    pass
+\"\"\"
+            try:
+                with open("restarter.py", "w") as f:
+                    f.write(restarter_code)
+                
+                # Get current executable and script arguments
+                # Note: We assume the server was started as `python pimonitor_server.py`
+                # If packaged, sys.executable is the app, sys.argv[0] might be irrelevant.
+                # Standard python usage: sys.executable is python, sys.argv[0] is script
+                current_args = [sys.executable, sys.argv[0]]
+                
+                cmd = [sys.executable, "restarter.py", str(os.getpid())] + current_args
+                
+                if os.name == 'nt':
+                    subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                else:
+                    subprocess.Popen(cmd, start_new_session=True)
+                    
+                time.sleep(1)
+                os._exit(0) # Hard exit to ensure PID dies
+            except Exception as e:
+                print(f"Restart failed: {{e}}")
+
         threading.Thread(target=do_restart).start()
-        return jsonify({{'status': 'Restarting...'}})
+        return jsonify({{'status': 'Restarting process...'}})
     return jsonify({{'error': 'Invalid action'}}), 400
 
 # --- MAIN ---
