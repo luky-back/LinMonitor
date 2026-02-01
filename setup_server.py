@@ -36,7 +36,7 @@ from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 from datetime import datetime
 
-# Initialize mimetypes to ensure CSS/JS serve correctly on Windows
+# Initialize mimetypes
 mimetypes.init()
 
 # Configuration
@@ -52,13 +52,11 @@ SETTINGS_FILE = os.path.join(DATA_DIR, 'settings.json')
 DIST_DIR = os.path.join(BASE_DIR, 'dist')
 
 app = Flask(__name__, static_folder='dist', static_url_path='')
-# Enable CORS for all routes to support development mode (separate UI/Backend ports)
 CORS(app, resources={{r"/*": {{"origins": "*"}}}})
 
-# In-memory stores
 devices_store = {{}}
 
-# --- PERSISTENCE HELPERS ---
+# --- PERSISTENCE ---
 def ensure_data_dir():
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR)
@@ -77,16 +75,117 @@ def save_json(filepath, data):
     with open(filepath, 'w') as f:
         json.dump(data, f, indent=2)
 
-# Load Initial Settings
 server_settings = load_json(SETTINGS_FILE, {{
-    "repoUrl": "github.com/user/pimonitor-repo"
+    "repoUrl": "github.com/user/pimonitor-repo",
+    "localHash": "init"
 }})
 
-# --- MONITORING LOGIC (Self-Monitoring) ---
+# --- UPDATER SYSTEM ---
+def create_updater_scripts():
+    # Script B: The Worker
+    script_b = \"\"\"
+import os
+import sys
+import time
+import shutil
+import subprocess
 
+PID = int(sys.argv[1])
+UPDATE_DIR = sys.argv[2]
+TARGET_DIR = sys.argv[3]
+RESTART_CMD = sys.argv[4:]
+
+print(f"[B] Waiting for Server PID {{PID}} to exit...")
+try:
+    while True:
+        try:
+            os.kill(PID, 0)
+            time.sleep(1)
+        except OSError:
+            break
+except:
+    pass
+time.sleep(2)
+
+print("[B] Copying files...")
+for item in os.listdir(UPDATE_DIR):
+    s = os.path.join(UPDATE_DIR, item)
+    d = os.path.join(TARGET_DIR, item)
+    try:
+        if os.path.isdir(s):
+            if os.path.exists(d): shutil.rmtree(d)
+            shutil.copytree(s, d)
+        else:
+            shutil.copy2(s, d)
+    except Exception as e:
+        print(f"Failed to copy {{item}}: {{e}}")
+
+print("[B] Cleanup...")
+try:
+    shutil.rmtree(UPDATE_DIR)
+except:
+    pass
+
+print(f"[B] Restarting server: {{RESTART_CMD}}")
+subprocess.Popen(RESTART_CMD)
+\"\"\"
+    with open("update_script_B.py", "w", encoding="utf-8") as f:
+        f.write(script_b)
+
+    # Script A: The Launcher
+    script_a = \"\"\"
+import os
+import sys
+import subprocess
+import zipfile
+import requests
+import io
+import shutil
+
+URL = sys.argv[1]
+TARGET_DIR = os.getcwd()
+UPDATE_DIR = os.path.join(TARGET_DIR, "temp_update")
+
+print(f"[A] Downloading update from {{URL}}...")
+try:
+    download_url = URL
+    if "github.com" in URL and not URL.endswith(".zip"):
+        download_url = URL.rstrip('/') + "/archive/refs/heads/main.zip"
+    
+    r = requests.get(download_url)
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    
+    if os.path.exists(UPDATE_DIR): shutil.rmtree(UPDATE_DIR)
+    os.makedirs(UPDATE_DIR)
+    
+    z.extractall(UPDATE_DIR)
+    
+    extracted = os.listdir(UPDATE_DIR)
+    if len(extracted) == 1 and os.path.isdir(os.path.join(UPDATE_DIR, extracted[0])):
+        root = os.path.join(UPDATE_DIR, extracted[0])
+        for item in os.listdir(root):
+            shutil.move(os.path.join(root, item), UPDATE_DIR)
+        os.rmdir(root)
+        
+    cmd = [sys.executable, "update_script_B.py", str(os.getpid()), UPDATE_DIR, TARGET_DIR, sys.executable, "pimonitor_server.py"]
+    
+    if os.name == 'nt':
+        subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+    else:
+        subprocess.Popen(cmd, start_new_session=True)
+        
+    sys.exit(0)
+    
+except Exception as e:
+    print(f"[A] Error: {{e}}")
+    if os.path.exists(UPDATE_DIR): shutil.rmtree(UPDATE_DIR)
+\"\"\"
+    with open("update_script_A.py", "w", encoding="utf-8") as f:
+        f.write(script_a)
+
+# --- MONITORING ---
 def format_uptime(start_ts):
     if not start_ts: return "0s"
-    # pm_uptime is epoch ms
     seconds = int(time.time() - (start_ts / 1000))
     if seconds < 60: return f"{{seconds}}s"
     if seconds < 3600: return f"{{seconds // 60}}m"
@@ -94,55 +193,44 @@ def format_uptime(start_ts):
     return f"{{seconds // 86400}}d"
 
 def get_pm2_stats():
-    # Requires PM2 to be installed and accessible in path on the host
     try:
         if os.name == 'nt':
             cmd = ['pm2', 'jlist'] 
             result = subprocess.check_output(cmd, shell=True)
         else:
             result = subprocess.check_output(['pm2', 'jlist'])
-            
         processes = json.loads(result)
-        
         proc_list = []
         for p in processes:
             env = p.get('pm2_env', {{}})
             monit = p.get('monit', {{}})
-            
             status = env.get('status')
             if status not in ['online', 'stopped', 'errored', 'launching']:
                 status = 'stopped'
-                
             proc_list.append({{
                 "pid": p.get("pid", 0),
                 "name": p.get("name", "unknown"),
                 "pm_id": p.get("pm_id", 0),
                 "status": status,
                 "cpu": monit.get("cpu", 0),
-                "memory": round(monit.get("memory", 0) / 1024 / 1024, 1), # Bytes -> MB
+                "memory": round(monit.get("memory", 0) / 1024 / 1024, 1),
                 "uptime": format_uptime(env.get("pm_uptime", 0)),
                 "restarts": env.get("restart_time", 0),
                 "logs": [] 
             }})
         return proc_list
-    except Exception:
-        # PM2 not installed or failed
+    except:
         return []
 
 def get_system_stats():
     cpu_pct = psutil.cpu_percent(interval=None)
     mem = psutil.virtual_memory()
-    
-    # Network IO
     net1 = psutil.net_io_counters()
     time.sleep(1) 
     net2 = psutil.net_io_counters()
-    
     net_in = (net2.bytes_recv - net1.bytes_recv) / 1024
     net_out = (net2.bytes_sent - net1.bytes_sent) / 1024
-    
     disk = psutil.disk_usage('/')
-    
     temp = 0
     if hasattr(psutil, "sensors_temperatures"):
         temps = psutil.sensors_temperatures()
@@ -151,7 +239,6 @@ def get_system_stats():
                 if name in temps:
                     temp = temps[name][0].current
                     break
-    
     return {{
         "cpuUsage": cpu_pct,
         "memoryUsage": mem.percent,
@@ -169,25 +256,17 @@ def get_hardware_info():
         partitions = psutil.disk_partitions(all=False)
         for part in partitions:
             try:
-                # Get Usage per partition
                 usage = psutil.disk_usage(part.mountpoint)
-                
-                # Try to get model on Linux
                 model = "Generic Storage"
                 if platform.system() == 'Linux':
                     try:
-                        # Map partition to block device (e.g., /dev/sda1 -> sda)
                         device_name = part.device.split('/')[-1]
-                        # Remove digits for partition (sda1 -> sda), roughly
                         block_device = ''.join([i for i in device_name if not i.isdigit()])
-                        
                         model_path = f"/sys/class/block/{{block_device}}/device/model"
                         if os.path.exists(model_path):
                             with open(model_path, 'r') as f:
                                 model = f.read().strip()
-                    except:
-                        pass
-
+                    except: pass
                 storage_info.append({{
                     "name": part.device,
                     "model": model,
@@ -196,11 +275,8 @@ def get_hardware_info():
                     "interface": part.mountpoint,
                     "usage": usage.percent
                 }})
-            except:
-                continue
-    except Exception as e:
-        print(f"Storage info error: {{e}}")
-
+            except: continue
+    except: pass
     try:
         mem = psutil.virtual_memory()
         cpu_freq = psutil.cpu_freq()
@@ -218,48 +294,27 @@ def get_hardware_info():
                 "speed": "Unknown",
                 "formFactor": "DIMM"
             }},
-            "gpu": {{
-                "model": "Integrated/Unknown",
-                "vram": "Shared",
-                "driver": "N/A"
-            }},
+            "gpu": {{ "model": "Integrated/Unknown", "vram": "Shared", "driver": "N/A" }},
             "storage": storage_info
         }}
-    except Exception as e:
-        print(f"Hardware info error: {{e}}")
-        return {{
-             "cpu": {{ "model": "Unknown", "cores": 0, "threads": 0, "architecture": "Unknown", "baseSpeed": "0" }},
-             "memory": {{ "total": "0 GB", "type": "Unknown", "speed": "0", "formFactor": "Unknown" }},
-             "gpu": {{ "model": "Unknown", "vram": "0", "driver": "Unknown" }},
-             "storage": []
-        }}
+    except:
+        return {{ "cpu": {{}}, "memory": {{}}, "gpu": {{}}, "storage": [] }}
 
 def monitor_local_system():
     device_id = 'server-local'
-    print(f" ▸ Self-monitoring enabled for ID: {{device_id}}")
-    
     hardware_info = get_hardware_info()
-    
     while True:
         try:
             stats = get_system_stats()
             pm2_procs = get_pm2_stats()
-            
-            # Update store directly
             now_str = datetime.now().strftime('%H:%M:%S')
             current_time = time.time()
-            
             if device_id not in devices_store:
                 devices_store[device_id] = {{
-                    'id': device_id,
-                    'name': 'Local Server',
-                    'ip': '127.0.0.1',
+                    'id': device_id, 'name': 'Local Server', 'ip': '127.0.0.1',
                     'os': f"{{platform.system()}} {{platform.release()}}",
-                    'status': 'online',
-                    'lastSeen': current_time,
-                    'stats': stats,
-                    'processes': pm2_procs,
-                    'hardware': hardware_info,
+                    'status': 'online', 'lastSeen': current_time,
+                    'stats': stats, 'processes': pm2_procs, 'hardware': hardware_info,
                     'history': {{ 'cpu': [], 'memory': [], 'network': [] }}
                 }}
             else:
@@ -269,22 +324,14 @@ def monitor_local_system():
                 dev['stats'] = stats
                 dev['processes'] = pm2_procs
             
-            # Update history
             dev = devices_store[device_id]
             dev['history']['cpu'].append({{ 'time': now_str, 'value': stats.get('cpuUsage', 0) }})
             dev['history']['memory'].append({{ 'time': now_str, 'value': stats.get('memoryUsage', 0) }})
             dev['history']['network'].append({{ 'time': now_str, 'value': stats.get('networkIn', 0) }})
-            
             for key in ['cpu', 'memory', 'network']:
-                if len(dev['history'][key]) > MAX_HISTORY:
-                    dev['history'][key] = dev['history'][key][-MAX_HISTORY:]
-                    
-        except Exception as e:
-            print(f"Monitor error: {{e}}")
-            
+                if len(dev['history'][key]) > MAX_HISTORY: dev['history'][key] = dev['history'][key][-MAX_HISTORY:]
+        except Exception as e: print(f"Monitor error: {{e}}")
         time.sleep(2)
-
-# --- AUTH ENDPOINTS ---
 
 @app.route('/api/auth/check', methods=['GET'])
 def check_setup():
@@ -294,17 +341,9 @@ def check_setup():
 @app.route('/api/auth/setup', methods=['POST'])
 def setup_owner():
     users = load_json(USERS_FILE, [])
-    if len(users) > 0:
-        return jsonify({{'error': 'Setup already completed'}}), 400
-    
+    if len(users) > 0: return jsonify({{'error': 'Setup already completed'}}), 400
     data = request.json
-    new_user = {{
-        'id': str(uuid.uuid4()),
-        'username': data['username'],
-        'password': data['password'],
-        'role': 'Owner',
-        'joinedAt': datetime.now().isoformat()
-    }}
+    new_user = {{ 'id': str(uuid.uuid4()), 'username': data['username'], 'password': data['password'], 'role': 'Owner', 'joinedAt': datetime.now().isoformat() }}
     users.append(new_user)
     save_json(USERS_FILE, users)
     return jsonify(new_user)
@@ -314,8 +353,7 @@ def login():
     data = request.json
     users = load_json(USERS_FILE, [])
     user = next((u for u in users if u['username'] == data.get('username') and u['password'] == data.get('password')), None)
-    if user:
-        return jsonify(user)
+    if user: return jsonify(user)
     return jsonify({{'error': 'Invalid credentials'}}), 401
 
 @app.route('/api/auth/register', methods=['POST'])
@@ -325,26 +363,14 @@ def register():
     invites = load_json(INVITES_FILE, [])
     invite = next((i for i in invites if i['code'] == code), None)
     if not invite: return jsonify({{'error': 'Invalid code'}}), 400
-        
     users = load_json(USERS_FILE, [])
-    if any(u['username'] == data['username'] for u in users):
-        return jsonify({{'error': 'Username taken'}}), 400
-        
-    new_user = {{
-        'id': str(uuid.uuid4()),
-        'username': data['username'],
-        'password': data['password'],
-        'role': invite['role'],
-        'joinedAt': datetime.now().isoformat()
-    }}
+    if any(u['username'] == data['username'] for u in users): return jsonify({{'error': 'Username taken'}}), 400
+    new_user = {{ 'id': str(uuid.uuid4()), 'username': data['username'], 'password': data['password'], 'role': invite['role'], 'joinedAt': datetime.now().isoformat() }}
     users.append(new_user)
     save_json(USERS_FILE, users)
-    
     invites = [i for i in invites if i['code'] != code]
     save_json(INVITES_FILE, invites)
     return jsonify(new_user)
-
-# --- DATA ENDPOINTS ---
 
 @app.route('/api/users', methods=['GET'])
 def get_users():
@@ -356,12 +382,7 @@ def handle_invites():
     invites = load_json(INVITES_FILE, [])
     if request.method == 'POST':
         data = request.json
-        new_invite = {{
-            'code': str(int(time.time()))[-6:],
-            'role': data.get('role', 'Guest'),
-            'createdBy': data.get('createdBy', 'system'),
-            'expiresAt': int((time.time() + 300) * 1000)
-        }}
+        new_invite = {{ 'code': str(int(time.time()))[-6:], 'role': data.get('role', 'Guest'), 'createdBy': data.get('createdBy', 'system'), 'expiresAt': int((time.time() + 300) * 1000) }}
         invites.append(new_invite)
         save_json(INVITES_FILE, invites)
         return jsonify(new_invite)
@@ -374,63 +395,58 @@ def delete_invite(code):
     save_json(INVITES_FILE, invites)
     return jsonify({{'status': 'deleted'}})
 
-# --- MAILS & NOTIFICATIONS ---
-
 @app.route('/api/mail/<user_id>', methods=['GET'])
 def get_mails(user_id):
     all_mails = load_json(MAILS_FILE, [])
-    # Return mails where user is sender OR receiver
-    user_mails = [m for m in all_mails if m['toId'] == user_id or m['fromId'] == user_id]
-    return jsonify(user_mails)
+    return jsonify([m for m in all_mails if m['toId'] == user_id or m['fromId'] == user_id])
 
 @app.route('/api/mail', methods=['POST'])
 def send_mail():
     data = request.json
     all_mails = load_json(MAILS_FILE, [])
-    new_mail = {{
-        'id': f"m-{{int(time.time()*1000)}}",
-        'fromId': data['fromId'],
-        'toId': data['toId'],
-        'subject': data['subject'],
-        'body': data['body'],
-        'read': False,
-        'timestamp': datetime.now().isoformat()
-    }}
+    new_mail = {{ 'id': f"m-{{int(time.time()*1000)}}", 'fromId': data['fromId'], 'toId': data['toId'], 'subject': data['subject'], 'body': data['body'], 'read': False, 'timestamp': datetime.now().isoformat() }}
     all_mails.append(new_mail)
     save_json(MAILS_FILE, all_mails)
-    
-    # Auto-generate notification for receiver
     all_notifs = load_json(NOTIFICATIONS_FILE, [])
-    new_notif = {{
-        'id': f"n-{{int(time.time()*1000)}}",
-        'userId': data['toId'],
-        'type': 'info',
-        'message': f"New mail received",
-        'read': False,
-        'timestamp': datetime.now().isoformat()
-    }}
-    all_notifs.append(new_notif)
+    all_notifs.append({{ 'id': f"n-{{int(time.time()*1000)}}", 'userId': data['toId'], 'type': 'info', 'message': f"New mail received", 'read': False, 'timestamp': datetime.now().isoformat() }})
     save_json(NOTIFICATIONS_FILE, all_notifs)
-    
     return jsonify(new_mail)
+
+@app.route('/api/mail/<mail_id>', methods=['DELETE'])
+def delete_mail(mail_id):
+    all_mails = load_json(MAILS_FILE, [])
+    all_mails = [m for m in all_mails if m['id'] != mail_id]
+    save_json(MAILS_FILE, all_mails)
+    return jsonify({{'status': 'deleted'}})
+
+@app.route('/api/mail/<user_id>/read-all', methods=['PUT'])
+def mark_all_mails_read(user_id):
+    all_mails = load_json(MAILS_FILE, [])
+    for m in all_mails:
+        if m['toId'] == user_id: m['read'] = True
+    save_json(MAILS_FILE, all_mails)
+    return jsonify({{'status': 'success'}})
 
 @app.route('/api/notifications/<user_id>', methods=['GET'])
 def get_notifications(user_id):
     all_notifs = load_json(NOTIFICATIONS_FILE, [])
-    user_notifs = [n for n in all_notifs if n['userId'] == user_id]
-    return jsonify(user_notifs)
+    return jsonify([n for n in all_notifs if n['userId'] == user_id])
 
 @app.route('/api/notifications/<notif_id>/read', methods=['PUT'])
 def mark_notification_read(notif_id):
     all_notifs = load_json(NOTIFICATIONS_FILE, [])
     for n in all_notifs:
         if n['id'] == notif_id:
-            n['read'] = True
-            break
+            n['read'] = True; break
     save_json(NOTIFICATIONS_FILE, all_notifs)
     return jsonify({{'status': 'success'}})
 
-# --- TELEMETRY ---
+@app.route('/api/notifications/<user_id>/clear', methods=['DELETE'])
+def clear_all_notifications(user_id):
+    all_notifs = load_json(NOTIFICATIONS_FILE, [])
+    all_notifs = [n for n in all_notifs if n['userId'] != user_id]
+    save_json(NOTIFICATIONS_FILE, all_notifs)
+    return jsonify({{'status': 'cleared'}})
 
 @app.route('/api/telemetry', methods=['POST'])
 def receive_telemetry():
@@ -438,153 +454,143 @@ def receive_telemetry():
         data = request.json
         device_id = data.get('id')
         if not device_id: return jsonify({{'error': 'Device ID required'}}), 400
-            
         current_time = time.time()
         now_str = datetime.now().strftime('%H:%M:%S')
-        
         if device_id not in devices_store:
-            devices_store[device_id] = {{
-                'id': device_id,
-                'name': data.get('name', device_id),
-                'ip': request.remote_addr,
-                'os': data.get('os', 'Unknown'),
-                'status': 'online',
-                'lastSeen': current_time,
-                'stats': data.get('stats', {{}}),
-                'processes': data.get('processes', []),
-                'hardware': data.get('hardware', {{}}),
-                'history': {{ 'cpu': [], 'memory': [], 'network': [] }}
-            }}
+            devices_store[device_id] = {{ 'id': device_id, 'name': data.get('name', device_id), 'ip': request.remote_addr, 'os': data.get('os', 'Unknown'), 'status': 'online', 'lastSeen': current_time, 'stats': data.get('stats', {{}}), 'processes': data.get('processes', []), 'hardware': data.get('hardware', {{}}), 'history': {{ 'cpu': [], 'memory': [], 'network': [] }} }}
         else:
             dev = devices_store[device_id]
-            dev['status'] = 'online'
-            dev['lastSeen'] = current_time
-            dev['stats'] = data.get('stats', dev['stats'])
-            dev['processes'] = data.get('processes', dev['processes'])
-            dev['hardware'] = data.get('hardware', dev['hardware'])
-
+            dev['status'] = 'online'; dev['lastSeen'] = current_time; dev['stats'] = data.get('stats', dev['stats']); dev['processes'] = data.get('processes', dev['processes']); dev['hardware'] = data.get('hardware', dev['hardware'])
         dev = devices_store[device_id]
         stats = dev['stats']
         if stats:
             dev['history']['cpu'].append({{ 'time': now_str, 'value': stats.get('cpuUsage', 0) }})
             dev['history']['memory'].append({{ 'time': now_str, 'value': stats.get('memoryUsage', 0) }})
             dev['history']['network'].append({{ 'time': now_str, 'value': stats.get('networkIn', 0) }})
-            
             for key in ['cpu', 'memory', 'network']:
-                if len(dev['history'][key]) > MAX_HISTORY:
-                    dev['history'][key] = dev['history'][key][-MAX_HISTORY:]
-                    
+                if len(dev['history'][key]) > MAX_HISTORY: dev['history'][key] = dev['history'][key][-MAX_HISTORY:]
         return jsonify({{'status': 'success'}})
-    except Exception as e:
-        return jsonify({{'error': str(e)}}), 500
+    except Exception as e: return jsonify({{'error': str(e)}}), 500
 
 @app.route('/api/devices', methods=['GET'])
 def get_devices():
     results = []
     now = time.time()
     for d_id, dev in devices_store.items():
-        if now - dev['lastSeen'] > 15:
-            dev['status'] = 'offline'
+        if now - dev['lastSeen'] > 15: dev['status'] = 'offline'
         results.append(dev)
     return jsonify(results)
 
 @app.route('/api/settings', methods=['POST'])
 def update_settings():
     data = request.json
-    # Update global settings in memory
     global server_settings
     server_settings.update(data)
-    # Persist to disk
     save_json(SETTINGS_FILE, server_settings)
     return jsonify({{'status': 'success', 'settings': server_settings}})
 
 @app.route('/api/update/check', methods=['GET'])
 def check_update():
-    return jsonify({{ "status": "up-to-date", "currentVersion": "v1.0.0", "lastChecked": datetime.now().strftime("%H:%M:%S"), "repoUrl": server_settings.get('repoUrl') }})
+    repo_url = server_settings.get('repoUrl', '')
+    local_hash = server_settings.get('localHash', 'init')
+    status = "up-to-date"
+    remote_hash = None
+    
+    try:
+        if repo_url and "github.com" in repo_url:
+             parts = repo_url.rstrip('/').split('/')
+             if len(parts) >= 2:
+                owner, repo = parts[-2], parts[-1]
+                if repo.endswith('.git'): repo = repo[:-4]
+                # Check main branch commit hash
+                api = f"https://api.github.com/repos/{{owner}}/{{repo}}/commits/main"
+                r = requests.get(api, timeout=2)
+                if r.status_code == 200:
+                    data = r.json()
+                    remote_hash = data.get('sha')
+                    if remote_hash and remote_hash != local_hash:
+                        status = "update-available"
+    except: pass
+    
+    return jsonify({{
+        "status": status,
+        "currentVersion": local_hash[:7],
+        "availableVersion": remote_hash[:7] if remote_hash else "Unknown",
+        "lastChecked": datetime.now().strftime("%H:%M:%S"),
+        "repoUrl": repo_url,
+        "localHash": local_hash,
+        "remoteHash": remote_hash
+    }})
 
 @app.route('/api/update/execute', methods=['POST'])
 def execute_update():
+    repo_url = server_settings.get('repoUrl')
+    if not repo_url: return jsonify({{"error": "No repo URL"}}), 400
+    create_updater_scripts()
+    
+    # Update local hash BEFORE triggering update so next boot sees new version
+    # In a real scenario, this happens after success, but here we assume success for the persistent state
+    try:
+        parts = repo_url.rstrip('/').split('/')
+        owner, repo = parts[-2], parts[-1]
+        if repo.endswith('.git'): repo = repo[:-4]
+        r = requests.get(f"https://api.github.com/repos/{{owner}}/{{repo}}/commits/main")
+        if r.status_code == 200:
+            new_hash = r.json().get('sha')
+            server_settings['localHash'] = new_hash
+            save_json(SETTINGS_FILE, server_settings)
+    except: pass
+
+    def trigger():
+        time.sleep(2)
+        subprocess.Popen([sys.executable, "update_script_A.py", repo_url])
+    threading.Thread(target=trigger).start()
     return jsonify({{"status": "Update started"}})
 
-# --- MAIN ---
+@app.route('/api/system/power', methods=['POST'])
+def power_ops():
+    data = request.json
+    action = data.get('action')
+    if action == 'shutdown':
+        def do_shutdown():
+            time.sleep(1)
+            if os.name == 'nt': os.system('shutdown /s /t 0')
+            else: os.system('shutdown -h now')
+        threading.Thread(target=do_shutdown).start()
+        return jsonify({{'status': 'Shutting down...'}})
+    elif action == 'restart':
+        def do_restart():
+            time.sleep(1)
+            if os.name == 'nt': os.system('shutdown /r /t 0')
+            else: os.system('reboot')
+        threading.Thread(target=do_restart).start()
+        return jsonify({{'status': 'Restarting...'}})
+    return jsonify({{'error': 'Invalid action'}}), 400
 
+# --- MAIN ---
 @app.route('/')
 def serve_index():
-    if os.path.exists(os.path.join(DIST_DIR, 'index.html')):
-        return send_from_directory(DIST_DIR, 'index.html')
-    
-    # Fallback if UI is not built
-    return \"\"\"
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>PiMonitor Server</title>
-        <style>
-            body {{ background: #0f172a; color: #e2e8f0; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }}
-            .card {{ background: #1e293b; padding: 2rem; border-radius: 1rem; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); max-width: 500px; text-align: center; border: 1px solid #334155; }}
-            code {{ background: #0f172a; padding: 0.2rem 0.4rem; border-radius: 0.3rem; font-family: monospace; color: #38bdf8; }}
-            h1 {{ margin-top: 0; color: #fff; }}
-            .status {{ color: #10b981; font-weight: bold; margin-bottom: 1.5rem; }}
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <h1>PiMonitor Server</h1>
-            <div class="status">✓ API Operational</div>
-            <p>The backend is running successfully!</p>
-            <p>To see the dashboard, you need to build the React frontend:</p>
-            <div style="text-align: left; background: #0f172a; padding: 1rem; border-radius: 0.5rem; margin: 1rem 0;">
-                <div style="color: #94a3b8; margin-bottom: 0.5rem;"># In your project root:</div>
-                <code>npm run build</code>
-            </div>
-            <p style="font-size: 0.9rem; color: #94a3b8;">After building, reload this page.</p>
-        </div>
-    </body>
-    </html>
-    \"\"\", 200
+    if os.path.exists(os.path.join(DIST_DIR, 'index.html')): return send_from_directory(DIST_DIR, 'index.html')
+    return "Server Running. Build frontend to see dashboard.", 200
 
 @app.route('/<path:path>')
 def serve_static(path):
-    # Check if path exists in dist
-    if os.path.exists(os.path.join(DIST_DIR, path)):
-        return send_from_directory(DIST_DIR, path)
-    
-    # Otherwise fallback to index.html for SPA routing
-    if os.path.exists(os.path.join(DIST_DIR, 'index.html')):
-        return send_from_directory(DIST_DIR, 'index.html')
-        
+    if os.path.exists(os.path.join(DIST_DIR, path)): return send_from_directory(DIST_DIR, path)
+    if os.path.exists(os.path.join(DIST_DIR, 'index.html')): return send_from_directory(DIST_DIR, 'index.html')
     return serve_index()
 
 def get_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(('10.255.255.255', 1))
-        IP = s.getsockname()[0]
-    except Exception:
-        IP = '127.0.0.1'
-    finally:
-        s.close()
+    try: s.connect(('10.255.255.255', 1)); IP = s.getsockname()[0]
+    except: IP = '127.0.0.1'
+    finally: s.close()
     return IP
 
 if __name__ == '__main__':
     ensure_data_dir()
     ip = get_ip()
-    print("=" * 40)
-    print(f" PiMonitor Server v1.1.0")
-    print("=" * 40)
-    print(f" ▸ Local:   http://127.0.0.1:{{PORT}}")
-    print(f" ▸ Network: http://{{ip}}:{{PORT}}")
-    print("=" * 40)
-    print(" ▸ Self-monitoring: ENABLED")
-    print(" ▸ Persistence:     ENABLED")
-    print("=" * 40)
-    
-    # Start self-monitoring thread
-    monitor_thread = threading.Thread(target=monitor_local_system, daemon=True)
-    monitor_thread.start()
-    
+    print(f"PiMonitor Server | Local: http://127.0.0.1:{{PORT}} | Network: http://{{ip}}:{{PORT}}")
+    threading.Thread(target=monitor_local_system, daemon=True).start()
     app.run(host='0.0.0.0', port=PORT)
 """
     
@@ -595,22 +601,9 @@ if __name__ == '__main__':
 
 def main():
     clear_screen()
-    print("========================================")
-    print("      PiMonitor Server Setup            ")
-    print("========================================")
-    
-    port_input = input("Enter Port to listen on (default 3000): ").strip()
-    port = port_input if port_input else "3000"
-    
-    install_dependencies()
-    
-    script_name = generate_server_script(port)
-    
-    print("\n✓ Server script generated successfully!")
-    print(f"  Filename: {script_name}")
-    print("\nTo start the server:")
-    print(f"  python {script_name}")
-    print("\nNote: Ensure you run 'npm run build' to generate the UI assets in /dist.")
+    print("Generating Server Script...")
+    script_name = generate_server_script(3000)
+    print(f"Done: {script_name}")
 
 if __name__ == "__main__":
     main()
