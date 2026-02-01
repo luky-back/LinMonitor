@@ -90,10 +90,12 @@ const App: React.FC = () => {
   }, []);
 
   // --- DATA POLLING ---
+  
+  // Fast loop: Telemetry (Devices, System Status)
   useEffect(() => {
     if (!currentUser || connectionError) return;
 
-    const fetchData = async () => {
+    const fetchTelemetry = async () => {
         try {
             const devList = await api.getDevices();
             setDevices(devList);
@@ -115,19 +117,35 @@ const App: React.FC = () => {
             const notifList = await api.getNotifications(currentUser.id);
             setNotifications(notifList);
 
-            const updateStatus = await api.getUpdateStatus();
-            setUpdateConfig(prev => ({...prev, ...updateStatus}));
-
         } catch (e) {
             console.error("Polling error", e);
             // Optional: setConnectionError(true) if repeated failures
         }
     };
 
-    fetchData(); 
-    const interval = setInterval(fetchData, refreshRate);
+    fetchTelemetry(); 
+    const interval = setInterval(fetchTelemetry, refreshRate);
     return () => clearInterval(interval);
   }, [currentUser, refreshRate, connectionError]);
+
+  // Slow loop: System Updates (To avoid rate limiting)
+  useEffect(() => {
+    if (!currentUser || connectionError) return;
+    
+    const fetchUpdates = async () => {
+       try {
+         const updateStatus = await api.getUpdateStatus();
+         setUpdateConfig(prev => ({...prev, ...updateStatus}));
+       } catch (e) {
+         console.error("Update check failed", e);
+       }
+    };
+    
+    fetchUpdates();
+    // Check every 1 second
+    const interval = setInterval(fetchUpdates, 1000); 
+    return () => clearInterval(interval);
+  }, [currentUser, connectionError]);
 
   // --- ACTIONS ---
   const handleSetupOwner = async (username: string, passwordHash: string) => {
@@ -138,7 +156,7 @@ const App: React.FC = () => {
         setAuthError('');
     } catch (e: any) {
         setAuthError(e.message || "Setup failed");
-        throw e; // Re-throw for Auth component
+        throw e; // Crucial: Re-throw to trigger Auth component's error state
     }
   };
 
@@ -150,7 +168,7 @@ const App: React.FC = () => {
           setAuthError('');
       } catch (e: any) {
           setAuthError('Invalid credentials');
-          throw e; // Re-throw for Auth component
+          throw e; // Crucial: Re-throw to trigger Auth component's error state
       }
   }
 
@@ -162,7 +180,7 @@ const App: React.FC = () => {
         setAuthError('');
     } catch (e: any) {
         setAuthError(e.message || 'Registration failed');
-        throw e; // Re-throw for Auth component
+        throw e; // Crucial: Re-throw to trigger Auth component's error state
     }
   };
 
@@ -204,10 +222,17 @@ const App: React.FC = () => {
   const handleRemoveDevice = (id: string) => {}; 
   const handleUpdateLimits = (limits: ResourceLimits) => {};
   
-  const handleUpdateConfigChange = async (url: string) => {
+  const handleUpdateConfigChange = async (url: string, token: string) => {
       try {
-          await api.updateSettings({ repoUrl: url });
-          setUpdateConfig(prev => ({ ...prev, repoUrl: url }));
+          const payload: any = { repoUrl: url };
+          if(token) payload.githubToken = token;
+          
+          await api.updateSettings(payload);
+          setUpdateConfig(prev => ({ 
+              ...prev, 
+              repoUrl: url,
+              githubToken: token ? "configured" : prev.githubToken 
+          }));
       } catch (e) {
           console.error("Failed to update config", e);
       }
