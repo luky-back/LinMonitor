@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Mail as MailIcon, Send, Search, Plus, Trash2, Reply, ChevronDown, CheckCheck } from 'lucide-react';
+import { Mail as MailIcon, Send, Search, Plus, Trash2, Reply, ChevronDown, CheckCheck, Square, CheckSquare } from 'lucide-react';
 import { Mail, User } from '../types';
 import { translations } from '../translations';
 import { api } from '../services/api';
@@ -18,6 +18,9 @@ const MailPage: React.FC<MailPageProps> = ({ currentUser, users, mails, onSendMa
   const [searchParams, setSearchParams] = useSearchParams();
   const view = searchParams.get('view') === 'compose' ? 'compose' : 'inbox';
   const [selectedMailId, setSelectedMailId] = useState<string | null>(null);
+  
+  // Selection State
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   
   // Compose State
   const [toUser, setToUser] = useState('');
@@ -61,7 +64,37 @@ const MailPage: React.FC<MailPageProps> = ({ currentUser, users, mails, onSendMa
   const handleDelete = async (id: string) => {
       await api.deleteMail(id);
       if (selectedMailId === id) setSelectedMailId(null);
-      // Trigger reload or state update in parent ideally, but force update for now via window or assumption of polling
+      setSelectedIds(prev => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+      });
+  };
+
+  const handleBulkDelete = async () => {
+      if (selectedIds.size === 0) return;
+      await api.deleteMails(Array.from(selectedIds));
+      if (selectedMailId && selectedIds.has(selectedMailId)) {
+          setSelectedMailId(null);
+      }
+      setSelectedIds(new Set());
+  };
+
+  const toggleSelection = (id: string) => {
+      setSelectedIds(prev => {
+          const next = new Set(prev);
+          if (next.has(id)) next.delete(id);
+          else next.add(id);
+          return next;
+      });
+  };
+
+  const toggleAll = () => {
+      if (selectedIds.size === myMails.length) {
+          setSelectedIds(new Set());
+      } else {
+          setSelectedIds(new Set(myMails.map(m => m.id)));
+      }
   };
 
   const handleMarkAllRead = async () => {
@@ -76,20 +109,40 @@ const MailPage: React.FC<MailPageProps> = ({ currentUser, users, mails, onSendMa
       {/* Sidebar List */}
       <div className="w-80 bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shrink-0">
          <div className="p-4 border-b border-slate-800 space-y-3">
-            <button 
-              onClick={() => { setView('compose'); setSelectedMailId(null); }}
-              className={`w-full py-2 rounded-lg flex items-center justify-center gap-2 font-medium transition-colors ${
-                view === 'compose' ? 'bg-blue-700 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'
-              }`}
-            >
-               <Plus size={18} /> {t.compose}
-            </button>
-            <button 
-                onClick={handleMarkAllRead}
-                className="w-full py-1.5 rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 text-xs flex items-center justify-center gap-2 transition-colors"
-            >
-                <CheckCheck size={14} /> Mark all read
-            </button>
+            {selectedIds.size > 0 ? (
+                <button 
+                  onClick={handleBulkDelete}
+                  className="w-full py-2 rounded-lg flex items-center justify-center gap-2 font-medium transition-colors bg-rose-600 hover:bg-rose-500 text-white animate-in slide-in-from-top-1 duration-200"
+                >
+                   <Trash2 size={18} /> Delete ({selectedIds.size})
+                </button>
+            ) : (
+                <button 
+                  onClick={() => { setView('compose'); setSelectedMailId(null); }}
+                  className={`w-full py-2 rounded-lg flex items-center justify-center gap-2 font-medium transition-colors ${
+                    view === 'compose' ? 'bg-blue-700 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'
+                  }`}
+                >
+                   <Plus size={18} /> {t.compose}
+                </button>
+            )}
+            
+            <div className="flex gap-2">
+                <button 
+                    onClick={toggleAll}
+                    className="flex-1 py-1.5 rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 text-xs flex items-center justify-center gap-2 transition-colors"
+                >
+                    {selectedIds.size === myMails.length && myMails.length > 0 ? <CheckSquare size={14} className="text-blue-400" /> : <Square size={14} />} 
+                    {selectedIds.size === myMails.length ? "Deselect All" : "Select All"}
+                </button>
+                <button 
+                    onClick={handleMarkAllRead}
+                    className="flex-1 py-1.5 rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 text-xs flex items-center justify-center gap-2 transition-colors"
+                    title="Mark all as read"
+                >
+                    <CheckCheck size={14} /> Read All
+                </button>
+            </div>
          </div>
          <div className="flex-1 overflow-y-auto">
             {myMails.length === 0 ? (
@@ -99,22 +152,26 @@ const MailPage: React.FC<MailPageProps> = ({ currentUser, users, mails, onSendMa
                   <div 
                     key={mail.id} 
                     onClick={() => { setSelectedMailId(mail.id); setView('inbox'); }}
-                    className={`p-4 border-b border-slate-800 cursor-pointer hover:bg-slate-800 transition-colors group relative ${selectedMailId === mail.id && view === 'inbox' ? 'bg-slate-800 border-l-2 border-l-blue-500' : ''}`}
+                    className={`p-4 border-b border-slate-800 cursor-pointer hover:bg-slate-800 transition-colors group relative flex gap-3 ${selectedMailId === mail.id && view === 'inbox' ? 'bg-slate-800 border-l-2 border-l-blue-500 pl-[14px]' : ''}`}
                   >
-                     <div className="flex justify-between mb-1">
-                        <span className={`text-sm font-medium ${!mail.read ? 'text-white' : 'text-slate-300'}`}>{getSenderName(mail.fromId)}</span>
-                        <span className="text-xs text-slate-500">{new Date(mail.timestamp).toLocaleDateString()}</span>
-                     </div>
-                     <div className={`text-sm mb-1 ${!mail.read ? 'text-white font-medium' : 'text-slate-400'}`}>{mail.subject}</div>
-                     <div className="text-xs text-slate-500 truncate pr-6">{mail.body}</div>
-                     
-                     <button 
-                        onClick={(e) => { e.stopPropagation(); handleDelete(mail.id); }}
-                        className="absolute right-2 bottom-2 p-1.5 text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all bg-slate-900/80 rounded"
-                        title="Delete"
+                     <div 
+                        onClick={(e) => { e.stopPropagation(); toggleSelection(mail.id); }}
+                        className="pt-1 text-slate-500 hover:text-blue-400"
                      >
-                         <Trash2 size={14} />
-                     </button>
+                        {selectedIds.has(mail.id) ? (
+                            <CheckSquare size={18} className="text-blue-500" />
+                        ) : (
+                            <Square size={18} />
+                        )}
+                     </div>
+                     <div className="flex-1 min-w-0">
+                         <div className="flex justify-between mb-1">
+                            <span className={`text-sm font-medium ${!mail.read ? 'text-white' : 'text-slate-300'}`}>{getSenderName(mail.fromId)}</span>
+                            <span className="text-xs text-slate-500">{new Date(mail.timestamp).toLocaleDateString()}</span>
+                         </div>
+                         <div className={`text-sm mb-1 truncate ${!mail.read ? 'text-white font-medium' : 'text-slate-400'}`}>{mail.subject}</div>
+                         <div className="text-xs text-slate-500 truncate">{mail.body}</div>
+                     </div>
                   </div>
                ))
             )}
