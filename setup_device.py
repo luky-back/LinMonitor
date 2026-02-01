@@ -40,6 +40,7 @@ import sys
 import zipfile
 import io
 import shutil
+import re
 
 # Configuration
 API_ENDPOINT = "{endpoint}"
@@ -58,6 +59,8 @@ import zipfile
 import io
 import shutil
 import subprocess
+import re
+import importlib.util
 
 REPO_URL = "{{repo_url}}"
 TOKEN = "{{token}}"
@@ -93,39 +96,61 @@ try:
     os.makedirs(extract_path)
     z.extractall(extract_path)
     
-    # Find the device script in the extracted folder
-    # We look for setup_device.py or pimonitor_device.py or just use the largest python file?
-    # Simplification: we expect the repo to have the structure from setup. 
-    # Actually, we need to extract the 'pimonitor_device.py' logic from 'setup_device.py' again?
-    # No, the user requested an updater for setup_device.py OR the running file.
-    # We will assume the repo contains 'setup_device.py' and we just replace that if it's the target, 
-    # OR if this is the running agent 'pimonitor_device.py', we need to re-generate it.
-    
-    # Strategy: Just restart the script if successful. 
-    # For now, let's assume we are updating 'pimonitor_device.py' content directly if provided, 
-    # but since we download a zip, we need to find the source.
-    # To keep it robust without complex parsing: We will look for 'setup_device.py' in the repo, 
-    # run it to generate a NEW 'pimonitor_device.py', and then run that.
-    
+    # Find setup_device.py in the extracted folder to regenerate the agent
     root_folder = os.listdir(extract_path)[0]
     full_path = os.path.join(extract_path, root_folder)
+    setup_script_path = os.path.join(full_path, "setup_device.py")
     
-    setup_script = os.path.join(full_path, "setup_device.py")
-    if os.path.exists(setup_script):
-        # We found setup_device.py. We need to generate the new agent script.
-        # But we can't easily run the interactive setup.
-        # A better approach for this customized agent:
-        # The agent code is embedded in setup_device.py. 
-        # We can try to just copy setup_device.py to the current dir for future use,
-        # AND more importantly, we need to update THIS running file.
-        # Since this running file was generated, it's hard to update it from source repo directly unless 
-        # the repo has the generated file (it doesn't).
+    if os.path.exists(setup_script_path):
+        print("Found setup script. Regenerating agent code...")
         
-        # fallback: just restart for now to simulate update cycle or 
-        # realistically: download the raw 'setup_device.py' and re-run generation logic? Too complex for this snippet.
-        pass
+        # Read old API endpoint from the target file to preserve config
+        old_url = ""
+        if os.path.exists(TARGET_FILE):
+            with open(TARGET_FILE, 'r') as f:
+                content = f.read()
+                match = re.search(r'API_ENDPOINT = "(.*?)"', content)
+                if match:
+                    old_url = match.group(1)
+        
+        if old_url:
+            # Import the new setup script dynamically
+            spec = importlib.util.spec_from_file_location("new_setup_module", setup_script_path)
+            new_setup = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(new_setup)
+            
+            # Extract base URL from endpoint (remove /api/telemetry)
+            base_url = old_url.replace("/api/telemetry", "")
+            
+            # The generate_agent_script function writes to a file in CWD.
+            # We temporarily change CWD to temp dir to let it write there, then read it.
+            cwd = os.getcwd()
+            os.chdir(full_path)
+            try:
+                # Generate new agent file
+                new_file_path = new_setup.generate_agent_script(base_url)
+                
+                # Read generated content
+                with open(new_file_path, 'r') as f:
+                    new_code = f.read()
+                
+                # Restore CWD
+                os.chdir(cwd)
+                
+                # Overwrite running agent file
+                with open(TARGET_FILE, 'w') as f:
+                    f.write(new_code)
+                    
+                print("Agent updated successfully.")
+            except Exception as e:
+                print(f"Failed during regeneration: {{e}}")
+                os.chdir(cwd)
+        else:
+            print("Could not find old API URL. Aborting update.")
+    else:
+        print("setup_device.py not found in update. Cannot update agent.")
     
-    print("Update complete (Simulated). Restarting agent...")
+    print("Restarting agent...")
     
     # Cleanup
     try:
@@ -133,8 +158,11 @@ try:
     except:
         pass
 
-    # Restart
-    subprocess.Popen([sys.executable, TARGET_FILE])
+    # Restart the agent
+    if os.name == 'nt':
+        subprocess.Popen([sys.executable, TARGET_FILE], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    else:
+        subprocess.Popen([sys.executable, TARGET_FILE], start_new_session=True)
     
     # Self-delete updater
     try:
@@ -144,6 +172,7 @@ try:
 
 except Exception as e:
     print(f"Update failed: {{e}}")
+    # Try to restart anyway
     subprocess.Popen([sys.executable, TARGET_FILE])
 \"\"\"
     
@@ -338,7 +367,13 @@ def main():
                     if repo_url:
                         updater_script = create_agent_updater(repo_url, token, sys.argv[0], os.getpid())
                         print(f"Launching updater: {{updater_script}}")
-                        subprocess.Popen([sys.executable, updater_script])
+                        
+                        # Launch updater detached
+                        if os.name == 'nt':
+                            subprocess.Popen([sys.executable, updater_script], creationflags=subprocess.CREATE_NEW_CONSOLE)
+                        else:
+                            subprocess.Popen([sys.executable, updater_script], start_new_session=True)
+                            
                         sys.exit(0)
             
         except requests.exceptions.ConnectionError:
