@@ -55,11 +55,14 @@ app = Flask(__name__, static_folder='dist', static_url_path='')
 CORS(app, resources={{r"/*": {{"origins": "*"}}}})
 
 devices_store = {{}}
-# Cache for update checking to prevent GitHub API rate limiting
+pending_updates = {{}} # Key: DeviceID, Value: {{ url: string, token: string }}
+
+# Cache for update checking
 update_cache = {{
     "last_check": 0,
     "status": "up-to-date",
     "remote_hash": None,
+    "changed_files": [],
     "error": None
 }}
 
@@ -85,7 +88,9 @@ def save_json(filepath, data):
 server_settings = load_json(SETTINGS_FILE, {{
     "repoUrl": "github.com/user/pimonitor-repo",
     "localHash": "init",
-    "githubToken": ""
+    "githubToken": "",
+    "autoUpdateDevices": False,
+    "updateNotifications": True
 }})
 
 # --- UPDATER SYSTEM ---
@@ -454,6 +459,13 @@ def mark_notification_read(notif_id):
     save_json(NOTIFICATIONS_FILE, all_notifs)
     return jsonify({{'status': 'success'}})
 
+@app.route('/api/notifications/<notif_id>', methods=['DELETE'])
+def delete_notification(notif_id):
+    all_notifs = load_json(NOTIFICATIONS_FILE, [])
+    all_notifs = [n for n in all_notifs if n['id'] != notif_id]
+    save_json(NOTIFICATIONS_FILE, all_notifs)
+    return jsonify({{'status': 'deleted'}})
+
 @app.route('/api/notifications/<user_id>/clear', methods=['DELETE'])
 def clear_all_notifications(user_id):
     all_notifs = load_json(NOTIFICATIONS_FILE, [])
@@ -469,11 +481,31 @@ def receive_telemetry():
         if not device_id: return jsonify({{'error': 'Device ID required'}}), 400
         current_time = time.time()
         now_str = datetime.now().strftime('%H:%M:%S')
+        
+        # Check if there is a pending update command for this device
+        response_data = {{'status': 'success'}}
+        if device_id in pending_updates:
+            print(f"Sending update command to {{device_id}}")
+            response_data['command'] = 'update'
+            response_data['repoUrl'] = pending_updates[device_id]['url']
+            response_data['token'] = pending_updates[device_id]['token']
+            del pending_updates[device_id]
+        elif server_settings.get('autoUpdateDevices', False) and update_cache['status'] == 'update-available':
+             # Auto update logic could be refined to check device version vs server
+             pass
+
         if device_id not in devices_store:
             devices_store[device_id] = {{ 'id': device_id, 'name': data.get('name', device_id), 'ip': request.remote_addr, 'os': data.get('os', 'Unknown'), 'status': 'online', 'lastSeen': current_time, 'stats': data.get('stats', {{}}), 'processes': data.get('processes', []), 'hardware': data.get('hardware', {{}}), 'history': {{ 'cpu': [], 'memory': [], 'network': [] }} }}
         else:
             dev = devices_store[device_id]
             dev['status'] = 'online'; dev['lastSeen'] = current_time; dev['stats'] = data.get('stats', dev['stats']); dev['processes'] = data.get('processes', dev['processes']); dev['hardware'] = data.get('hardware', dev['hardware'])
+        
+        # Mark update available if server detects a newer hash and thinks device is old (Simplified logic: if server has update, devices might too)
+        if update_cache['status'] == 'update-available':
+             devices_store[device_id]['updateAvailable'] = True
+        else:
+             devices_store[device_id]['updateAvailable'] = False
+
         dev = devices_store[device_id]
         stats = dev['stats']
         if stats:
@@ -482,7 +514,8 @@ def receive_telemetry():
             dev['history']['network'].append({{ 'time': now_str, 'value': stats.get('networkIn', 0) }})
             for key in ['cpu', 'memory', 'network']:
                 if len(dev['history'][key]) > MAX_HISTORY: dev['history'][key] = dev['history'][key][-MAX_HISTORY:]
-        return jsonify({{'status': 'success'}})
+        
+        return jsonify(response_data)
     except Exception as e: return jsonify({{'error': str(e)}}), 500
 
 @app.route('/api/devices', methods=['GET'])
@@ -493,6 +526,24 @@ def get_devices():
         if now - dev['lastSeen'] > 15: dev['status'] = 'offline'
         results.append(dev)
     return jsonify(results)
+
+@app.route('/api/devices/update', methods=['POST'])
+def trigger_device_update():
+    data = request.json
+    device_id = data.get('deviceId') # 'all' or specific ID
+    repo_url = server_settings.get('repoUrl')
+    token = server_settings.get('githubToken', '')
+    
+    if not repo_url: return jsonify({{'error': 'Repository not configured'}}), 400
+    
+    if device_id == 'all':
+        for d_id in devices_store.keys():
+            if d_id != 'server-local':
+                pending_updates[d_id] = {{ 'url': repo_url, 'token': token }}
+        return jsonify({{'status': 'queued_all'}})
+    else:
+        pending_updates[device_id] = {{ 'url': repo_url, 'token': token }}
+        return jsonify({{'status': 'queued', 'device': device_id}})
 
 @app.route('/api/settings', methods=['POST'])
 def update_settings():
@@ -515,8 +566,8 @@ def check_update():
     now = time.time()
     
     # Check if we should fetch new data (cache expired or forced)
-    # Cache duration: 1 second (High frequency check requested)
-    if force or (now - update_cache['last_check'] > 1):
+    # Cache duration: 60 seconds (Standard)
+    if force or (now - update_cache['last_check'] > 60):
         update_cache['last_check'] = now
         update_cache['error'] = None
         try:
@@ -531,17 +582,26 @@ def check_update():
                     if github_token:
                         headers['Authorization'] = f"token {{github_token}}"
                     
-                    # Add timeout to prevent hanging
                     r = requests.get(api_url, headers=headers, timeout=5)
                     
                     if r.status_code == 200:
                         data = r.json()
                         remote_hash = data.get('sha')
                         update_cache['remote_hash'] = remote_hash
+                        
+                        # Get changed files if hashes differ
                         if remote_hash and remote_hash != local_hash:
                             update_cache['status'] = "update-available"
+                            # Fetch commit details to get file list
+                            r_commit = requests.get(data.get('url'), headers=headers, timeout=5)
+                            if r_commit.status_code == 200:
+                                files = r_commit.json().get('files', [])
+                                update_cache['changed_files'] = [f['filename'] for f in files]
+                            else:
+                                update_cache['changed_files'] = ["Unable to list files"]
                         else:
                             update_cache['status'] = "up-to-date"
+                            update_cache['changed_files'] = []
                     elif r.status_code == 403 or r.status_code == 429:
                         update_cache['error'] = "GitHub Rate Limited (Add Token)"
                     else:
@@ -561,7 +621,8 @@ def check_update():
         "localHash": local_hash,
         "remoteHash": update_cache['remote_hash'],
         "error": update_cache['error'],
-        "githubToken": github_token[:4] + "..." if github_token else ""
+        "githubToken": github_token[:4] + "..." if github_token else "",
+        "changedFiles": update_cache['changed_files']
     }})
 
 @app.route('/api/update/execute', methods=['POST'])
