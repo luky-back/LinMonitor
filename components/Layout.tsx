@@ -26,7 +26,8 @@ interface LayoutProps {
   notifications: Notification[];
   onLogout: () => void;
   onClearNotification: (id: string) => void;
-  unreadMailCount?: number; // Added
+  onDeleteNotification: (id: string) => void;
+  unreadMailCount?: number; 
 }
 
 const colorMap: Record<string, string> = {
@@ -56,16 +57,12 @@ const Layout: React.FC<LayoutProps> = ({
   currentUser, 
   notifications,
   onLogout,
-  onClearNotification
+  onClearNotification,
+  onDeleteNotification
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
   const [isNotifOpen, setIsNotifOpen] = React.useState(false);
   const [focusMode, setFocusMode] = React.useState(false);
-  
-  // Need to fetch unread mails count logic if not passed, but for now assuming MailPage handles read status locally
-  // We'll fetch just count here or pass it down? Let's implement a simple polling for unread badge in main App or assume passed.
-  // Actually, we can just peek at the App level state if we had it. For now, let's use a ref or internal simple poll? 
-  // Better: The parent `App.tsx` should pass `mails` to Layout to calculate unread. I'll modify App.tsx too.
   
   const t = translations[language] || translations['en'];
 
@@ -73,8 +70,7 @@ const Layout: React.FC<LayoutProps> = ({
 
   const handleClearAll = async () => {
       await api.clearAllNotifications(currentUser.id);
-      // In a real app we'd trigger a refresh or optimistically clear
-      window.location.reload(); // Simple reload to refresh state for this "hacky" demo
+      window.location.reload(); 
   };
 
   const SidebarItem = ({ to, icon: Icon, label, badge }: { to: string; icon: any; label: string, badge?: number }) => (
@@ -141,7 +137,6 @@ const Layout: React.FC<LayoutProps> = ({
                   <SidebarItem to="/server" icon={HardDrive} label={t.server} />
                 )}
 
-                {/* We need to pass mail count prop from parent, but for now let's just show label */}
                 <SidebarItem to="/mail" icon={Mail} label={t.mail} />
                 
                 <SidebarItem to="/users" icon={Users} label={t.users} />
@@ -209,7 +204,6 @@ const Layout: React.FC<LayoutProps> = ({
                     {isNotifOpen && (
                       <>
                         <div className="fixed inset-0 z-10" onClick={() => setIsNotifOpen(false)} />
-                        {/* Fix positioning: right-0 ensures it anchors to the right edge */}
                         <div className="absolute right-0 top-full mt-2 w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-20 max-h-96 overflow-hidden flex flex-col animate-in slide-in-from-top-2 duration-200 origin-top-right">
                             <div className="p-3 border-b border-slate-800 font-medium text-white text-sm flex justify-between items-center bg-slate-950/50">
                               <span className="flex items-center gap-2"><Bell size={14} /> {t.notifications}</span>
@@ -230,8 +224,15 @@ const Layout: React.FC<LayoutProps> = ({
                                   </div>
                               )}
                               {notifications.map(notif => (
-                                  <div key={notif.id} className={`p-3 text-sm transition-colors ${notif.read ? 'bg-slate-900 opacity-60' : 'bg-slate-800/40 hover:bg-slate-800'}`}>
-                                    <p className="text-slate-200">{notif.message}</p>
+                                  <div key={notif.id} className={`p-3 text-sm transition-colors group relative ${notif.read ? 'bg-slate-900 opacity-60' : 'bg-slate-800/40 hover:bg-slate-800'}`}>
+                                    <p className="text-slate-200 pr-6">{notif.message}</p>
+                                    <button 
+                                      onClick={() => onDeleteNotification(notif.id)}
+                                      className="absolute right-2 top-2 p-1 text-slate-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                      title="Delete"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
                                     <div className="flex justify-between items-center mt-2">
                                         <span className="text-[10px] text-slate-500">{new Date(notif.timestamp || Date.now()).toLocaleTimeString()}</span>
                                         {!notif.read && (
