@@ -25,7 +25,8 @@ import {
   ChevronDown,
   ChevronUp,
   Power,
-  RefreshCw
+  RefreshCw,
+  CloudDownload
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -40,6 +41,7 @@ import { Device, PM2Process, AppSettings, ProcessAction } from '../types';
 import { translations } from '../translations';
 import { DeviceHardware, DeviceTerminal } from '../components/DeviceWidgets';
 import SecurityModal from '../components/SecurityModal';
+import { api } from '../services/api';
 
 interface DevicesProps {
   devices: Device[];
@@ -427,6 +429,11 @@ const Devices: React.FC<DevicesProps> = ({ devices, onRenameDevice, onRenameProc
     }
   };
 
+  const handleTriggerUpdate = async (id: string) => {
+      await api.triggerDeviceUpdate(id);
+      alert(`Update command queued for ${id}`);
+  };
+
   const filteredProcesses = selectedDevice?.processes.filter(p => 
     p.name.toLowerCase().includes(processSearch.toLowerCase()) || 
     p.pid.toString().includes(processSearch)
@@ -457,7 +464,10 @@ const Devices: React.FC<DevicesProps> = ({ devices, onRenameDevice, onRenameProc
       <div className="w-full lg:w-80 flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shrink-0 h-full">
         <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900 sticky top-0 z-10">
           <h2 className="font-bold text-white">{t.devices}</h2>
-          <button onClick={() => setIsModalOpen(true)} className={`p-1.5 text-white rounded-md transition-colors ${accentBgMap[settings.accentColor]}`}><Plus size={18} /></button>
+          <div className="flex gap-2">
+             <button onClick={() => handleTriggerUpdate('all')} title="Update All Devices" className="p-1.5 text-blue-400 hover:bg-blue-500/10 rounded-md transition-colors"><CloudDownload size={18} /></button>
+             <button onClick={() => setIsModalOpen(true)} className={`p-1.5 text-white rounded-md transition-colors ${accentBgMap[settings.accentColor]}`}><Plus size={18} /></button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {devices.map(device => (
@@ -473,7 +483,10 @@ const Devices: React.FC<DevicesProps> = ({ devices, onRenameDevice, onRenameProc
               <div className="flex items-center gap-3">
                 <div className={`w-2 h-2 rounded-full ${device.status === 'offline' ? 'bg-red-500' : device.stats.cpuUsage > 90 ? 'bg-rose-500' : 'bg-emerald-500'}`} />
                 <div>
-                  <div className={`font-medium text-sm ${selectedDeviceId === device.id ? accentTextMap[settings.accentColor].split(' ')[0] : 'text-slate-300'}`}>{device.name}</div>
+                  <div className={`font-medium text-sm flex items-center gap-2 ${selectedDeviceId === device.id ? accentTextMap[settings.accentColor].split(' ')[0] : 'text-slate-300'}`}>
+                      {device.name}
+                      {device.updateAvailable && <div className="w-1.5 h-1.5 rounded-full bg-blue-500" title="Update Available"></div>}
+                  </div>
                   <div className="text-xs text-slate-500 font-mono">{device.ip}</div>
                 </div>
               </div>
@@ -510,6 +523,14 @@ const Devices: React.FC<DevicesProps> = ({ devices, onRenameDevice, onRenameProc
               </div>
             </div>
             <div className="flex items-center gap-3">
+              {selectedDevice.updateAvailable && (
+                  <button 
+                    onClick={() => handleTriggerUpdate(selectedDevice.id)}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg font-medium transition-colors shadow-lg shadow-blue-900/20"
+                  >
+                      <CloudDownload size={14} /> Update
+                  </button>
+              )}
               <div className="flex p-1 bg-slate-800 rounded-lg mr-2 border border-slate-700">
                   <button onClick={() => handleTabChange('overview')} className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${activeTab === 'overview' ? activeTabMap[settings.accentColor] : 'text-slate-400 hover:text-white'}`}>{t.overview}</button>
                   <button onClick={() => handleTabChange('hardware')} className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium transition-all ${activeTab === 'hardware' ? activeTabMap[settings.accentColor] : 'text-slate-400 hover:text-white'}`}><HardDrive size={14} />{t.hardware}</button>
