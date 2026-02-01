@@ -1,4 +1,4 @@
-import { Device, User, InviteCode, Mail, Notification, UpdateConfig } from '../types';
+import { Device, User, InviteCode, Mail, Notification, UpdateConfig, AppSettings } from '../types';
 
 const STORAGE_KEY = 'pimonitor_api_url';
 
@@ -148,6 +148,10 @@ export const api = {
       await fetch(`${API_BASE}/mail/${mailId}`, { method: 'DELETE' });
   },
 
+  async deleteMails(mailIds: string[]): Promise<void> {
+      await Promise.all(mailIds.map(id => this.deleteMail(id)));
+  },
+
   async markAllMailsRead(userId: string): Promise<void> {
       await fetch(`${API_BASE}/mail/${userId}/read-all`, { method: 'PUT' });
   },
@@ -160,6 +164,10 @@ export const api = {
 
   async markNotificationRead(id: string): Promise<void> {
     await fetch(`${API_BASE}/notifications/${id}/read`, { method: 'PUT' });
+  },
+
+  async deleteNotification(id: string): Promise<void> {
+    await fetch(`${API_BASE}/notifications/${id}`, { method: 'DELETE' });
   },
 
   async clearAllNotifications(userId: string): Promise<void> {
@@ -176,7 +184,15 @@ export const api = {
       await fetch(`${API_BASE}/update/execute`, { method: 'POST' });
   },
 
-  async updateSettings(settings: Partial<UpdateConfig>): Promise<void> {
+  async triggerDeviceUpdate(deviceId: string): Promise<void> {
+      await fetch(`${API_BASE}/devices/update`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ deviceId })
+      });
+  },
+
+  async updateSettings(settings: Partial<UpdateConfig & AppSettings>): Promise<void> {
       await fetch(`${API_BASE}/settings`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
