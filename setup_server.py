@@ -84,7 +84,8 @@ def save_json(filepath, data):
 
 server_settings = load_json(SETTINGS_FILE, {{
     "repoUrl": "github.com/user/pimonitor-repo",
-    "localHash": "init"
+    "localHash": "init",
+    "githubToken": ""
 }})
 
 # --- UPDATER SYSTEM ---
@@ -150,6 +151,7 @@ import io
 import shutil
 
 URL = sys.argv[1]
+TOKEN = sys.argv[2] if len(sys.argv) > 2 else ""
 TARGET_DIR = os.getcwd()
 UPDATE_DIR = os.path.join(TARGET_DIR, "temp_update")
 
@@ -159,7 +161,11 @@ try:
     if "github.com" in URL and not URL.endswith(".zip"):
         download_url = URL.rstrip('/') + "/archive/refs/heads/main.zip"
     
-    r = requests.get(download_url)
+    headers = {{}}
+    if TOKEN and TOKEN.strip() != "":
+        headers['Authorization'] = f"token {{TOKEN}}"
+
+    r = requests.get(download_url, headers=headers)
     z = zipfile.ZipFile(io.BytesIO(r.content))
     
     if os.path.exists(UPDATE_DIR): shutil.rmtree(UPDATE_DIR)
@@ -503,13 +509,14 @@ def check_update():
     global update_cache
     repo_url = server_settings.get('repoUrl', '')
     local_hash = server_settings.get('localHash', 'init')
+    github_token = server_settings.get('githubToken', '')
     
     force = request.args.get('force') == 'true'
     now = time.time()
     
     # Check if we should fetch new data (cache expired or forced)
-    # Cache duration: 66 seconds (1.1 minutes)
-    if force or (now - update_cache['last_check'] > 66):
+    # Cache duration: 1 second (High frequency check requested)
+    if force or (now - update_cache['last_check'] > 1):
         update_cache['last_check'] = now
         update_cache['error'] = None
         try:
@@ -520,8 +527,12 @@ def check_update():
                     if repo.endswith('.git'): repo = repo[:-4]
                     
                     api_url = f"https://api.github.com/repos/{{owner}}/{{repo}}/commits/main"
+                    headers = {{}}
+                    if github_token:
+                        headers['Authorization'] = f"token {{github_token}}"
+                    
                     # Add timeout to prevent hanging
-                    r = requests.get(api_url, timeout=5)
+                    r = requests.get(api_url, headers=headers, timeout=5)
                     
                     if r.status_code == 200:
                         data = r.json()
@@ -532,7 +543,7 @@ def check_update():
                         else:
                             update_cache['status'] = "up-to-date"
                     elif r.status_code == 403 or r.status_code == 429:
-                        update_cache['error'] = "GitHub Rate Limited"
+                        update_cache['error'] = "GitHub Rate Limited (Add Token)"
                     else:
                          update_cache['error'] = f"GitHub Error {{r.status_code}}"
             else:
@@ -549,12 +560,14 @@ def check_update():
         "repoUrl": repo_url,
         "localHash": local_hash,
         "remoteHash": update_cache['remote_hash'],
-        "error": update_cache['error']
+        "error": update_cache['error'],
+        "githubToken": github_token[:4] + "..." if github_token else ""
     }})
 
 @app.route('/api/update/execute', methods=['POST'])
 def execute_update():
     repo_url = server_settings.get('repoUrl')
+    token = server_settings.get('githubToken', '')
     if not repo_url: return jsonify({{"error": "No repo URL"}}), 400
     create_updater_scripts()
     
@@ -562,7 +575,10 @@ def execute_update():
         parts = repo_url.rstrip('/').split('/')
         owner, repo = parts[-2], parts[-1]
         if repo.endswith('.git'): repo = repo[:-4]
-        r = requests.get(f"https://api.github.com/repos/{{owner}}/{{repo}}/commits/main")
+        headers = {{}}
+        if token: headers['Authorization'] = f"token {{token}}"
+        
+        r = requests.get(f"https://api.github.com/repos/{{owner}}/{{repo}}/commits/main", headers=headers)
         if r.status_code == 200:
             new_hash = r.json().get('sha')
             server_settings['localHash'] = new_hash
@@ -571,7 +587,7 @@ def execute_update():
 
     def trigger():
         time.sleep(2)
-        subprocess.Popen([sys.executable, "update_script_A.py", repo_url])
+        subprocess.Popen([sys.executable, "update_script_A.py", repo_url, token])
     threading.Thread(target=trigger).start()
     return jsonify({{"status": "Update started"}})
 
