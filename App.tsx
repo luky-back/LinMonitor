@@ -10,7 +10,7 @@ import MailPage from './pages/Mail';
 import UsersPage from './pages/Users';
 import { Device, AppSettings, User, Mail, Notification, InviteCode, UpdateConfig } from './types';
 import { api } from './services/api';
-import { WifiOff, RefreshCw, Server as ServerIcon, CloudDownload, Clock, CheckCircle, Loader, FileCode, Package, Play, AlertTriangle, XCircle } from 'lucide-react';
+import { WifiOff, RefreshCw, Server as ServerIcon, Download, Clock, CheckCircle, Loader, FileCode, Package, Play, AlertTriangle, XCircle } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -213,7 +213,7 @@ const App: React.FC = () => {
                         <div className="flex justify-between items-start">
                              <div className="flex items-center gap-3">
                                  <div className="p-3 bg-white/10 rounded-xl backdrop-blur-sm">
-                                     <CloudDownload className="text-white" size={24} />
+                                     <Download className="text-white" size={24} />
                                  </div>
                                  <div>
                                      <h2 className="text-xl font-bold text-white">System Update</h2>
@@ -259,7 +259,7 @@ const App: React.FC = () => {
                                 <div>
                                     <div className="flex justify-between items-end mb-2">
                                         <h3 className="text-white font-medium flex items-center gap-2">
-                                            {updateStep === 'downloading' && <><CloudDownload size={18} className="animate-bounce" /> Downloading Files...</>}
+                                            {updateStep === 'downloading' && <><Download size={18} className="animate-bounce" /> Downloading Files...</>}
                                             {updateStep === 'building' && <><Package size={18} className="animate-pulse" /> Building Frontend...</>}
                                             {updateStep === 'restarting' && <><Play size={18} className="animate-spin" /> Restarting Service...</>}
                                             {updateStep === 'done' && <><CheckCircle size={18} className="text-emerald-500" /> Complete!</>}
