@@ -55,6 +55,13 @@ app = Flask(__name__, static_folder='dist', static_url_path='')
 CORS(app, resources={{r"/*": {{"origins": "*"}}}})
 
 devices_store = {{}}
+# Cache for update checking to prevent GitHub API rate limiting
+update_cache = {{
+    "last_check": 0,
+    "status": "up-to-date",
+    "remote_hash": None,
+    "error": None
+}}
 
 # --- PERSISTENCE ---
 def ensure_data_dir():
@@ -487,39 +494,62 @@ def update_settings():
     global server_settings
     server_settings.update(data)
     save_json(SETTINGS_FILE, server_settings)
+    # Force a re-check on next update polling by expiring the cache
+    update_cache['last_check'] = 0 
     return jsonify({{'status': 'success', 'settings': server_settings}})
 
 @app.route('/api/update/check', methods=['GET'])
 def check_update():
+    global update_cache
     repo_url = server_settings.get('repoUrl', '')
     local_hash = server_settings.get('localHash', 'init')
-    status = "up-to-date"
-    remote_hash = None
     
-    try:
-        if repo_url and "github.com" in repo_url:
-             parts = repo_url.rstrip('/').split('/')
-             if len(parts) >= 2:
-                owner, repo = parts[-2], parts[-1]
-                if repo.endswith('.git'): repo = repo[:-4]
-                # Check main branch commit hash
-                api = f"https://api.github.com/repos/{{owner}}/{{repo}}/commits/main"
-                r = requests.get(api, timeout=2)
-                if r.status_code == 200:
-                    data = r.json()
-                    remote_hash = data.get('sha')
-                    if remote_hash and remote_hash != local_hash:
-                        status = "update-available"
-    except: pass
+    force = request.args.get('force') == 'true'
+    now = time.time()
     
+    # Check if we should fetch new data (cache expired or forced)
+    # Cache duration: 66 seconds (1.1 minutes)
+    if force or (now - update_cache['last_check'] > 66):
+        update_cache['last_check'] = now
+        update_cache['error'] = None
+        try:
+            if repo_url and "github.com" in repo_url:
+                 parts = repo_url.rstrip('/').split('/')
+                 if len(parts) >= 2:
+                    owner, repo = parts[-2], parts[-1]
+                    if repo.endswith('.git'): repo = repo[:-4]
+                    
+                    api_url = f"https://api.github.com/repos/{{owner}}/{{repo}}/commits/main"
+                    # Add timeout to prevent hanging
+                    r = requests.get(api_url, timeout=5)
+                    
+                    if r.status_code == 200:
+                        data = r.json()
+                        remote_hash = data.get('sha')
+                        update_cache['remote_hash'] = remote_hash
+                        if remote_hash and remote_hash != local_hash:
+                            update_cache['status'] = "update-available"
+                        else:
+                            update_cache['status'] = "up-to-date"
+                    elif r.status_code == 403 or r.status_code == 429:
+                        update_cache['error'] = "GitHub Rate Limited"
+                    else:
+                         update_cache['error'] = f"GitHub Error {{r.status_code}}"
+            else:
+                update_cache['status'] = "up-to-date"
+                update_cache['remote_hash'] = None
+        except Exception as e:
+            update_cache['error'] = str(e)
+            
     return jsonify({{
-        "status": status,
+        "status": update_cache['status'],
         "currentVersion": local_hash[:7],
-        "availableVersion": remote_hash[:7] if remote_hash else "Unknown",
-        "lastChecked": datetime.now().strftime("%H:%M:%S"),
+        "availableVersion": update_cache['remote_hash'][:7] if update_cache['remote_hash'] else "Unknown",
+        "lastChecked": datetime.fromtimestamp(update_cache['last_check']).strftime("%H:%M:%S"),
         "repoUrl": repo_url,
         "localHash": local_hash,
-        "remoteHash": remote_hash
+        "remoteHash": update_cache['remote_hash'],
+        "error": update_cache['error']
     }})
 
 @app.route('/api/update/execute', methods=['POST'])
@@ -528,8 +558,6 @@ def execute_update():
     if not repo_url: return jsonify({{"error": "No repo URL"}}), 400
     create_updater_scripts()
     
-    # Update local hash BEFORE triggering update so next boot sees new version
-    # In a real scenario, this happens after success, but here we assume success for the persistent state
     try:
         parts = repo_url.rstrip('/').split('/')
         owner, repo = parts[-2], parts[-1]
