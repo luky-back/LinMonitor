@@ -4,6 +4,7 @@ import platform
 import subprocess
 import shutil
 import time
+import re
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -17,6 +18,45 @@ def install_dependencies():
         print(f"X Error installing dependencies: {e}")
         print("Please run this script with sudo/admin rights.")
         sys.exit(1)
+
+def validate_url(url):
+    if not url.startswith("http"):
+        url = "http://" + url
+    url = url.rstrip("/")
+    
+    # Simple check for obvious errors like 5+ octets (e.g. 192.168.178.203.128)
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if hostname:
+            parts = hostname.split('.')
+            if all(p.isdigit() for p in parts) and len(parts) > 4:
+                print(f"\n[WARNING] The IP '{hostname}' looks invalid (too many segments). IPv4 addresses usually have 4 parts (e.g. 192.168.1.50).")
+                if input("Continue anyway? (y/n): ").lower() != 'y':
+                    return None
+    except:
+        pass
+    return url
+
+def test_connection(url):
+    print(f"\nTesting connection to {url}...")
+    try:
+        import requests
+        # Use short timeout to fail fast
+        r = requests.get(f"{url}/api/telemetry", timeout=3)
+        if r.status_code == 200:
+            print("✓ Server reachable!")
+            return True
+        else:
+            print(f"X Server reachable but responded with status: {r.status_code}")
+            return True # Reachable, but maybe api error
+    except Exception as e:
+        print(f"X Connection failed: {e}")
+        print("  - Check IP address (run 'python pimonitor_server.py' on server to see list)")
+        print("  - Check if server is running")
+        print("  - Check firewall settings (Port 3000)")
+        return False
 
 def generate_agent_script(server_url):
     # Ensure URL has scheme
@@ -376,10 +416,10 @@ def main():
                             
                         sys.exit(0)
             else:
-                print(f"Server returned status: {{r.status_code}}")
+                print(f"Server reachable but returned status: {{r.status_code}}")
             
         except requests.exceptions.ConnectionError:
-            print("Server unreachable...")
+            print(f"Server unreachable at {{API_ENDPOINT}}...")
         except Exception as e:
             print(f"Error: {{e}}")
             
@@ -433,12 +473,26 @@ def main():
     print("This script sets up the monitoring agent.")
     print("")
     
-    server_ip = input("Enter Server IP/URL (e.g. 192.168.203.128:3000): ").strip()
-    if not server_ip:
-        print("Error: Server IP is required.")
-        return
-
     install_dependencies()
+    
+    while True:
+        server_ip = input("Enter Server IP/URL (e.g. 192.168.1.50:3000): ").strip()
+        if not server_ip:
+            print("Error: Server IP is required.")
+            continue
+            
+        validated_url = validate_url(server_ip)
+        if not validated_url:
+            continue
+            
+        if test_connection(validated_url):
+            server_ip = validated_url
+            break
+        
+        if input("\nConnection failed. Retry? (y/n): ").lower() == 'n':
+            if input("Proceed anyway? (Script might not work) (y/n): ").lower() == 'y':
+                server_ip = validated_url
+                break
     
     print("\nGenerating agent script...")
     script_path = generate_agent_script(server_ip)
