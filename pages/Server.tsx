@@ -8,7 +8,7 @@ import {
   Settings,
   Save,
   GitBranch,
-  CloudDownload,
+  Download,
   Loader2,
   FileCode,
   Terminal,
@@ -132,7 +132,7 @@ const Server: React.FC<ServerProps> = ({ server, language, settings, currentUser
              <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl">
                 <div className="flex justify-between items-start mb-6">
                     <div>
-                        <h3 className="text-lg font-semibold text-white flex items-center gap-2"><CloudDownload size={20} className="text-blue-400" /> System Update</h3>
+                        <h3 className="text-lg font-semibold text-white flex items-center gap-2"><Download size={20} className="text-blue-400" /> System Update</h3>
                         <p className="text-sm text-slate-400 mt-1">Hash-based update detection.</p>
                     </div>
                     <div className={`px-3 py-1 rounded-full text-xs font-medium border flex items-center gap-2 ${getStatusColor(updateConfig.status)}`}>
@@ -209,7 +209,7 @@ const Server: React.FC<ServerProps> = ({ server, language, settings, currentUser
                     </div>
                     {updateConfig.status === 'update-available' && (
                         <button onClick={() => setIsUpdateConfirmOpen(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg flex items-center gap-2 font-medium shadow-lg shadow-blue-900/20 animate-pulse transition-colors">
-                            <CloudDownload size={18} /> Apply Update
+                            <Download size={18} /> Apply Update
                         </button>
                     )}
                 </div>
