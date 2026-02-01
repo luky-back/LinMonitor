@@ -14,7 +14,8 @@ import {
   Terminal,
   Cpu,
   Copy,
-  Check
+  Check,
+  Edit2
 } from 'lucide-react';
 import { Device, AppSettings, User, ResourceLimits, UpdateConfig } from '../types';
 import { translations } from '../translations';
@@ -34,15 +35,15 @@ interface ServerProps {
 }
 
 const UpdateProgressModal: React.FC<{ isOpen: boolean; repoUrl: string }> = ({ isOpen, repoUrl }) => {
-    const [step, setStep] = useState(0);
-    const [logs, setLogs] = useState<string[]>([]);
-    // ... logic remains ...
     if (!isOpen) return null;
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
              <div className="absolute inset-0 bg-black/90 backdrop-blur-md"></div>
-             {/* ... simplified for brevity, assume content same ... */}
-             <div className="relative bg-slate-900 border border-slate-700 rounded-xl p-8 text-white">Updating... Check Console.</div>
+             <div className="relative bg-slate-900 border border-slate-700 rounded-xl p-8 text-white flex flex-col items-center gap-4">
+                <Loader2 size={32} className="animate-spin text-blue-500" />
+                <p>Updating System...</p>
+                <p className="text-xs text-slate-500">The server will restart automatically.</p>
+             </div>
         </div>
     );
 }
@@ -57,8 +58,14 @@ const Server: React.FC<ServerProps> = ({ server, language, settings, currentUser
   const [ramLimit, setRamLimit] = useState(server.resourceLimits?.maxRam || 32);
   const [diskLimit, setDiskLimit] = useState(server.resourceLimits?.maxDisk || 1000);
   const [hasChanges, setHasChanges] = useState(false);
+  
   const [repoInput, setRepoInput] = useState(updateConfig.repoUrl);
   const [isEditingRepo, setIsEditingRepo] = useState(false);
+
+  // Sync repo input when config loads
+  useEffect(() => {
+      setRepoInput(updateConfig.repoUrl);
+  }, [updateConfig.repoUrl]);
 
   const canEditLimits = currentUser.role === 'Owner' || currentUser.role === 'Admin';
   const isOwner = currentUser.role === 'Owner';
@@ -72,7 +79,11 @@ const Server: React.FC<ServerProps> = ({ server, language, settings, currentUser
 
   const handleLimitChange = (setter: any, value: number) => { setter(value); setHasChanges(true); };
   const saveLimits = () => { onUpdateLimits({ maxCpu: cpuLimit, maxRam: ramLimit, maxDisk: diskLimit }); setHasChanges(false); };
-  const saveRepoUrl = () => { onUpdateConfigChange(repoInput); setIsEditingRepo(false); }
+  
+  const saveRepoUrl = () => { 
+      onUpdateConfigChange(repoInput); 
+      setIsEditingRepo(false); 
+  }
   
   const copySystemInfo = () => {
       const info = `OS: ${server.os}\nIP: ${server.ip}\nCPU: ${server.hardware.cpu.model}\nRAM: ${server.hardware.memory.total}`;
@@ -138,20 +149,50 @@ const Server: React.FC<ServerProps> = ({ server, language, settings, currentUser
                         {updateConfig.status}
                     </div>
                 </div>
-                {/* ... Repo URL logic ... */}
-                <div className="flex justify-between items-center">
-                    <div className="text-sm text-slate-500 font-mono">
-                        Local: {updateConfig.localHash?.substring(0,7)} • Remote: {updateConfig.remoteHash?.substring(0,7) || 'Checking...'}
+
+                {/* Repo URL UI */}
+                <div className="mb-6 p-4 bg-slate-950 rounded-lg border border-slate-800">
+                    <div className="flex justify-between items-center mb-2">
+                        <label className="text-xs text-slate-500 uppercase font-bold tracking-wider flex items-center gap-2">
+                            <GitBranch size={12} /> Target Repository
+                        </label>
+                        {!isEditingRepo && isOwner && (
+                            <button onClick={() => setIsEditingRepo(true)} className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors">
+                                <Edit2 size={12} /> Edit
+                            </button>
+                        )}
+                    </div>
+                    {isEditingRepo ? (
+                        <div className="flex gap-2 animate-in fade-in slide-in-from-left-1 duration-200">
+                            <input 
+                                value={repoInput}
+                                onChange={(e) => setRepoInput(e.target.value)}
+                                className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:border-blue-500 outline-none font-mono placeholder-slate-600"
+                                placeholder="https://github.com/user/repo"
+                                autoFocus
+                            />
+                            <button onClick={saveRepoUrl} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-medium transition-colors">Save</button>
+                            <button onClick={() => { setIsEditingRepo(false); setRepoInput(updateConfig.repoUrl); }} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs transition-colors">Cancel</button>
+                        </div>
+                    ) : (
+                        <div className="text-sm text-slate-300 font-mono break-all bg-slate-900/50 p-2 rounded border border-transparent hover:border-slate-800 transition-colors">
+                            {updateConfig.repoUrl || "No repository configured"}
+                        </div>
+                    )}
+                </div>
+
+                <div className="flex justify-between items-center pt-2 border-t border-slate-800">
+                    <div className="text-sm text-slate-500 font-mono flex gap-4">
+                        <span title="Local Hash">Local: {updateConfig.localHash?.substring(0,7) || 'Unknown'}</span>
+                        <span title="Remote Hash">Remote: {updateConfig.remoteHash?.substring(0,7) || 'Checking...'}</span>
                     </div>
                     {updateConfig.status === 'update-available' && (
-                        <button onClick={() => setIsUpdateConfirmOpen(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg flex items-center gap-2 font-medium shadow-lg shadow-blue-900/20 animate-pulse">
+                        <button onClick={() => setIsUpdateConfirmOpen(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg flex items-center gap-2 font-medium shadow-lg shadow-blue-900/20 animate-pulse transition-colors">
                             <CloudDownload size={18} /> Apply Update
                         </button>
                     )}
                 </div>
              </div>
-            
-            {/* Resource Limits (Same as before) */}
             
             {/* Aggregate Stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -226,7 +267,7 @@ const Server: React.FC<ServerProps> = ({ server, language, settings, currentUser
             <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setIsUpdateConfirmOpen(false)}></div>
             <div className="relative bg-slate-900 border border-slate-700 rounded-xl w-full max-w-md shadow-2xl p-6 animate-in zoom-in-95">
                 <h2 className="text-lg font-bold text-white mb-4">Confirm Update</h2>
-                <p className="text-slate-400 text-sm mb-6">Updating will replace server files and restart the service.</p>
+                <p className="text-slate-400 text-sm mb-6">Updating will replace server files and restart the service. Ensure your repository URL is correct.</p>
                 <div className="flex justify-end gap-3">
                     <button onClick={() => setIsUpdateConfirmOpen(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded">Cancel</button>
                     <button onClick={() => { setIsUpdateConfirmOpen(false); onTriggerUpdate(); }} className="px-4 py-2 bg-blue-600 text-white rounded font-medium">Confirm</button>
