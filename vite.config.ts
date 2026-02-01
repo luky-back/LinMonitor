@@ -13,18 +13,14 @@ export default defineConfig({
         'react-dom/client',
         'react-router-dom',
         'recharts',
-        'lucide-react',
-        'xterm',
-        'xterm-addon-fit'
+        'lucide-react'
       ],
       output: {
         globals: {
           react: 'React',
           'react-dom': 'ReactDOM',
           'react-router-dom': 'ReactRouterDOM',
-          recharts: 'Recharts',
-          xterm: 'Terminal',
-          'xterm-addon-fit': 'FitAddon'
+          recharts: 'Recharts'
         }
       }
     }
