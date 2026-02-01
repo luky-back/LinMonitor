@@ -755,17 +755,48 @@ def serve_static(path):
     if os.path.exists(os.path.join(DIST_DIR, 'index.html')): return send_from_directory(DIST_DIR, 'index.html')
     return serve_index()
 
-def get_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try: s.connect(('10.255.255.255', 1)); IP = s.getsockname()[0]
-    except: IP = '127.0.0.1'
-    finally: s.close()
-    return IP
+def get_all_ips():
+    ips = []
+    try:
+        # Method 1: Hostname resolution (often gets localhost or 127.0.1.1)
+        hostname = socket.gethostname()
+        try:
+            ips.append(socket.gethostbyname(hostname))
+        except: pass
+        
+        # Method 2: Connect to external (reliable for main interface)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try: 
+            s.connect(('10.255.255.255', 1))
+            ip = s.getsockname()[0]
+            if ip not in ips: ips.append(ip)
+        except: pass
+        finally: s.close()
+        
+        # Method 3: Parse psutil if available (most robust)
+        if hasattr(psutil, "net_if_addrs"):
+            for interface, snics in psutil.net_if_addrs().items():
+                for snic in snics:
+                    if snic.family == socket.AF_INET:
+                        if snic.address != '127.0.0.1' and snic.address not in ips:
+                            ips.append(snic.address)
+    except: pass
+    
+    return ips if ips else ['127.0.0.1']
 
 if __name__ == '__main__':
     ensure_data_dir()
-    ip = get_ip()
-    print(f"PiMonitor Server | Local: http://127.0.0.1:{{PORT}} | Network: http://{{ip}}:{{PORT}}")
+    ips = get_all_ips()
+    print(f"==================================================")
+    print(f"PiMonitor Server Running on Port {{PORT}}")
+    print(f"==================================================")
+    print(f"Local Access: http://127.0.0.1:{{PORT}}")
+    print(f"Network Access:")
+    for ip in ips:
+        if ip != '127.0.0.1':
+            print(f"  - http://{{ip}}:{{PORT}}")
+    print(f"==================================================")
+    
     threading.Thread(target=monitor_local_system, daemon=True).start()
     app.run(host='0.0.0.0', port=PORT)
 """
