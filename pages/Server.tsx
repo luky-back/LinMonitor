@@ -16,7 +16,8 @@ import {
   Copy,
   Check,
   Edit2,
-  AlertTriangle
+  AlertTriangle,
+  Key
 } from 'lucide-react';
 import { Device, AppSettings, User, ResourceLimits, UpdateConfig } from '../types';
 import { translations } from '../translations';
@@ -31,22 +32,8 @@ interface ServerProps {
   currentUser: User;
   onUpdateLimits: (limits: ResourceLimits) => void;
   updateConfig: UpdateConfig;
-  onUpdateConfigChange: (url: string) => void;
+  onUpdateConfigChange: (url: string, token: string) => void;
   onTriggerUpdate: () => void;
-}
-
-const UpdateProgressModal: React.FC<{ isOpen: boolean; repoUrl: string }> = ({ isOpen, repoUrl }) => {
-    if (!isOpen) return null;
-    return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-             <div className="absolute inset-0 bg-black/90 backdrop-blur-md"></div>
-             <div className="relative bg-slate-900 border border-slate-700 rounded-xl p-8 text-white flex flex-col items-center gap-4">
-                <Loader2 size={32} className="animate-spin text-blue-500" />
-                <p>Updating System...</p>
-                <p className="text-xs text-slate-500">The server will restart automatically.</p>
-             </div>
-        </div>
-    );
 }
 
 const Server: React.FC<ServerProps> = ({ server, language, settings, currentUser, onUpdateLimits, updateConfig, onUpdateConfigChange, onTriggerUpdate }) => {
@@ -61,6 +48,7 @@ const Server: React.FC<ServerProps> = ({ server, language, settings, currentUser
   const [hasChanges, setHasChanges] = useState(false);
   
   const [repoInput, setRepoInput] = useState(updateConfig.repoUrl);
+  const [tokenInput, setTokenInput] = useState("");
   const [isEditingRepo, setIsEditingRepo] = useState(false);
 
   // Sync repo input when config loads
@@ -81,9 +69,11 @@ const Server: React.FC<ServerProps> = ({ server, language, settings, currentUser
   const handleLimitChange = (setter: any, value: number) => { setter(value); setHasChanges(true); };
   const saveLimits = () => { onUpdateLimits({ maxCpu: cpuLimit, maxRam: ramLimit, maxDisk: diskLimit }); setHasChanges(false); };
   
-  const saveRepoUrl = () => { 
-      onUpdateConfigChange(repoInput); 
-      setIsEditingRepo(false); 
+  const saveRepoConfig = () => { 
+      onUpdateConfigChange(repoInput, tokenInput); 
+      setIsEditingRepo(false);
+      // Clear token from state input for security (it's saved in backend)
+      setTokenInput(""); 
   }
   
   const copySystemInfo = () => {
@@ -171,20 +161,43 @@ const Server: React.FC<ServerProps> = ({ server, language, settings, currentUser
                         )}
                     </div>
                     {isEditingRepo ? (
-                        <div className="flex gap-2 animate-in fade-in slide-in-from-left-1 duration-200">
-                            <input 
-                                value={repoInput}
-                                onChange={(e) => setRepoInput(e.target.value)}
-                                className="flex-1 bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:border-blue-500 outline-none font-mono placeholder-slate-600"
-                                placeholder="https://github.com/user/repo"
-                                autoFocus
-                            />
-                            <button onClick={saveRepoUrl} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-medium transition-colors">Save</button>
-                            <button onClick={() => { setIsEditingRepo(false); setRepoInput(updateConfig.repoUrl); }} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs transition-colors">Cancel</button>
+                        <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-left-1 duration-200">
+                            <div>
+                                <label className="text-[10px] text-slate-500 uppercase mb-1 block">Repo URL</label>
+                                <input 
+                                    value={repoInput}
+                                    onChange={(e) => setRepoInput(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:border-blue-500 outline-none font-mono placeholder-slate-600"
+                                    placeholder="https://github.com/user/repo"
+                                    autoFocus
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[10px] text-slate-500 uppercase mb-1 flex items-center gap-1"><Key size={10} /> GitHub Token (Optional)</label>
+                                <input 
+                                    type="password"
+                                    value={tokenInput}
+                                    onChange={(e) => setTokenInput(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm text-white focus:border-blue-500 outline-none font-mono placeholder-slate-600"
+                                    placeholder="github_pat_..."
+                                />
+                                <p className="text-[10px] text-slate-500 mt-1">Required to bypass rate limits or for private repos.</p>
+                            </div>
+                            <div className="flex gap-2 mt-1">
+                                <button onClick={saveRepoConfig} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-medium transition-colors">Save Config</button>
+                                <button onClick={() => { setIsEditingRepo(false); setRepoInput(updateConfig.repoUrl); setTokenInput(""); }} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs transition-colors">Cancel</button>
+                            </div>
                         </div>
                     ) : (
-                        <div className="text-sm text-slate-300 font-mono break-all bg-slate-900/50 p-2 rounded border border-transparent hover:border-slate-800 transition-colors">
-                            {updateConfig.repoUrl || "No repository configured"}
+                        <div className="flex flex-col gap-1">
+                            <div className="text-sm text-slate-300 font-mono break-all bg-slate-900/50 p-2 rounded border border-transparent hover:border-slate-800 transition-colors">
+                                {updateConfig.repoUrl || "No repository configured"}
+                            </div>
+                            {updateConfig.githubToken && (
+                                <div className="text-[10px] text-emerald-500 flex items-center gap-1 px-2">
+                                    <Key size={10} /> Token configured (Hidden)
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
