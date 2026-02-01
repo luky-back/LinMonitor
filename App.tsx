@@ -10,7 +10,7 @@ import MailPage from './pages/Mail';
 import UsersPage from './pages/Users';
 import { Device, AppSettings, User, Mail, Notification, InviteCode, UpdateConfig } from './types';
 import { api } from './services/api';
-import { WifiOff, RefreshCw, Server as ServerIcon, CloudDownload, Clock, CheckCircle, Loader, FileCode, Package, Play, AlertTriangle } from 'lucide-react';
+import { WifiOff, RefreshCw, Server as ServerIcon, CloudDownload, Clock, CheckCircle, Loader, FileCode, Package, Play, AlertTriangle, XCircle } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -147,6 +147,12 @@ const App: React.FC = () => {
       setTimeout(() => window.location.reload(), 2000);
   };
 
+  const handleDismissUpdate = () => {
+      setShowUpdateModal(false);
+      // Temporarily override local status so it doesn't pop up again this session
+      setUpdateConfig(prev => ({ ...prev, status: 'up-to-date' }));
+  };
+
   const CircularProgress = ({ value }: { value: number }) => {
       const radius = 8;
       const circumference = 2 * Math.PI * radius;
@@ -240,6 +246,12 @@ const App: React.FC = () => {
                                 </div>
                                 <button onClick={handleStartUpdate} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-lg shadow-lg shadow-blue-900/20 transition-all active:scale-[0.98]">
                                     Start Update
+                                </button>
+                                <button 
+                                    onClick={handleDismissUpdate} 
+                                    className="w-full mt-3 py-3 bg-transparent border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <XCircle size={18} /> Dismiss (False Positive)
                                 </button>
                             </>
                         ) : (
