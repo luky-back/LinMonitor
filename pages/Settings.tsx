@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Device, AppSettings } from '../types';
-import { Shield, Key, Bell, Globe, ChevronDown, Check, Palette, LayoutTemplate, CloudDownload } from 'lucide-react';
+import { Shield, Key, Bell, Globe, ChevronDown, Check, Palette, LayoutTemplate, Download } from 'lucide-react';
 import { translations } from '../translations';
 
 interface SettingsProps {
@@ -145,7 +145,7 @@ const Settings: React.FC<SettingsProps> = ({
         {/* Update & Notification Preferences */}
         <section className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
            <div className="p-6 border-b border-slate-800 flex items-center gap-3 bg-slate-900">
-              <CloudDownload className="text-blue-500" size={24} />
+              <Download className="text-blue-500" size={24} />
               <div>
                  <h2 className="text-lg font-semibold text-white">Update & Notifications</h2>
                  <p className="text-sm text-slate-400">Configure system updates.</p>
