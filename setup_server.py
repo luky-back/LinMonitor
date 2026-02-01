@@ -16,39 +16,18 @@ def install_dependencies():
         sys.exit(1)
 
 def generate_server_script(port):
+    # Using double braces {{ }} to escape them in f-string
     code = f"""
-import time
-import os
-import json
-import threading
-import requests
-import zipfile
-import io
-import shutil
-import sys
-import uuid
-import socket
-import psutil
-import platform
-import mimetypes
-import subprocess
-import signal
-from flask import Flask, request, jsonify, send_from_directory, Response
+import time, os, json, threading, requests, zipfile, io, shutil, sys, uuid, socket, psutil, platform, subprocess, signal
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from datetime import datetime
 
-# Initialize mimetypes
-mimetypes.init()
-
-# Configuration
 PORT = {port}
 MAX_HISTORY = 50
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 USERS_FILE = os.path.join(DATA_DIR, 'users.json')
-INVITES_FILE = os.path.join(DATA_DIR, 'invites.json')
-MAILS_FILE = os.path.join(DATA_DIR, 'mails.json')
-NOTIFICATIONS_FILE = os.path.join(DATA_DIR, 'notifications.json')
 SETTINGS_FILE = os.path.join(DATA_DIR, 'settings.json')
 DIST_DIR = os.path.join(BASE_DIR, 'dist')
 
@@ -56,7 +35,8 @@ app = Flask(__name__, static_folder='dist', static_url_path='')
 CORS(app, resources={{r"/*": {{"origins": "*"}}}})
 
 devices_store = {{}}
-pending_updates = {{}} # Key: DeviceID, Value: {{ url: string, token: string }}
+pending_updates = {{}}
+pending_commands = {{}} # Key: DeviceID, Value: 'reboot' | 'shutdown'
 
 # Cache for update checking
 update_cache = {{
@@ -67,36 +47,25 @@ update_cache = {{
     "error": None
 }}
 
-# --- PERSISTENCE ---
 def ensure_data_dir():
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
+    if not os.path.exists(DATA_DIR): os.makedirs(DATA_DIR)
 
 def load_json(filepath, default):
     if os.path.exists(filepath):
         try:
-            with open(filepath, 'r') as f:
-                return json.load(f)
-        except:
-            return default
+            with open(filepath, 'r') as f: return json.load(f)
+        except: return default
     return default
 
 def save_json(filepath, data):
     ensure_data_dir()
-    with open(filepath, 'w') as f:
-        json.dump(data, f, indent=2)
+    with open(filepath, 'w') as f: json.dump(data, f, indent=2)
 
-server_settings = load_json(SETTINGS_FILE, {{
-    "repoUrl": "github.com/user/pimonitor-repo",
-    "localHash": "init",
-    "githubToken": "",
-    "autoUpdateDevices": False,
-    "updateNotifications": True
-}})
+server_settings = load_json(SETTINGS_FILE, {{ "repoUrl": "", "localHash": "init" }})
 
 # --- UPDATER SYSTEM ---
 def create_updater_scripts():
-    # Script B: The Worker
+    # Script B: The Worker (Executes setup -> npm build -> start server)
     script_b = \"\"\"
 import os
 import sys
@@ -108,28 +77,17 @@ import signal
 PID = int(sys.argv[1])
 UPDATE_DIR = sys.argv[2]
 TARGET_DIR = sys.argv[3]
-RESTART_CMD = sys.argv[4:]
+PYTHON_EXEC = sys.argv[4]
 
 print(f"[B] Killing Server PID {{PID}}...")
 try:
     if os.name == 'nt':
-        # Force kill on windows to release file locks
         subprocess.call(['taskkill', '/F', '/PID', str(PID)])
     else:
         os.kill(PID, signal.SIGKILL)
-except Exception as e:
-    print(f"Kill failed (process might be dead): {{e}}")
+except: pass
 
-print(f"[B] Waiting for Server PID {{PID}} to exit...")
-try:
-    while True:
-        try:
-            os.kill(PID, 0)
-            time.sleep(1)
-        except OSError:
-            break
-except:
-    pass
+print(f"[B] Waiting for PID {{PID}}...")
 time.sleep(2)
 
 print("[B] Copying files...")
@@ -143,55 +101,57 @@ for item in os.listdir(UPDATE_DIR):
         else:
             shutil.copy2(s, d)
     except Exception as e:
-        print(f"Failed to copy {{item}}: {{e}}")
+        print(f"Copy Error {{item}}: {{e}}")
 
-print("[B] Cleanup...")
+print("[B] Cleanup temp...")
+try: shutil.rmtree(UPDATE_DIR)
+except: pass
+
+# --- NEW BUILD FLOW ---
+# 1. Exec setup_server.py
+print("[B] Running setup_server.py...")
+subprocess.call([PYTHON_EXEC, "setup_server.py"])
+
+# 2. npm run build
+print("[B] Running npm build...")
+npm_cmd = "npm.cmd" if os.name == 'nt' else "npm"
 try:
-    shutil.rmtree(UPDATE_DIR)
-except:
-    pass
+    subprocess.call([npm_cmd, "install"], cwd=TARGET_DIR) # Ensure deps
+    subprocess.call([npm_cmd, "run", "build"], cwd=TARGET_DIR)
+except Exception as e:
+    print(f"[B] Build failed: {{e}}")
 
-print(f"[B] Restarting server: {{RESTART_CMD}}")
-subprocess.Popen(RESTART_CMD)
+# 3. Start Server
+print(f"[B] Starting Server...")
+subprocess.Popen([PYTHON_EXEC, "pimonitor_server.py"])
 \"\"\"
     with open("update_script_B.py", "w", encoding="utf-8") as f:
         f.write(script_b)
 
-    # Script A: The Launcher
+    # Script A: The Launcher (Downloads & Unzips)
     script_a = \"\"\"
-import os
-import sys
-import subprocess
-import zipfile
-import requests
-import io
-import shutil
-
-URL = sys.argv[1]
-TOKEN = sys.argv[2] if len(sys.argv) > 2 else ""
-SERVER_PID = sys.argv[3] if len(sys.argv) > 3 else str(os.getpid())
-
+import os, sys, subprocess, zipfile, requests, io, shutil
+URL, TOKEN, SERVER_PID = sys.argv[1], sys.argv[2], sys.argv[3]
 TARGET_DIR = os.getcwd()
 UPDATE_DIR = os.path.join(TARGET_DIR, "temp_update")
 
-print(f"[A] Downloading update from {{URL}}...")
 try:
     download_url = URL
     if "github.com" in URL and not URL.endswith(".zip"):
         download_url = URL.rstrip('/') + "/archive/refs/heads/main.zip"
     
     headers = {{}}
-    if TOKEN and TOKEN.strip() != "":
-        headers['Authorization'] = f"token {{TOKEN}}"
+    if TOKEN: headers['Authorization'] = f"token {{TOKEN}}"
 
+    print(f"Downloading {{download_url}}...")
     r = requests.get(download_url, headers=headers)
     z = zipfile.ZipFile(io.BytesIO(r.content))
     
     if os.path.exists(UPDATE_DIR): shutil.rmtree(UPDATE_DIR)
     os.makedirs(UPDATE_DIR)
-    
     z.extractall(UPDATE_DIR)
     
+    # Flatten
     extracted = os.listdir(UPDATE_DIR)
     if len(extracted) == 1 and os.path.isdir(os.path.join(UPDATE_DIR, extracted[0])):
         root = os.path.join(UPDATE_DIR, extracted[0])
@@ -199,171 +159,72 @@ try:
             shutil.move(os.path.join(root, item), UPDATE_DIR)
         os.rmdir(root)
         
-    cmd = [sys.executable, "update_script_B.py", SERVER_PID, UPDATE_DIR, TARGET_DIR, sys.executable, "pimonitor_server.py"]
+    cmd = [sys.executable, "update_script_B.py", SERVER_PID, UPDATE_DIR, TARGET_DIR, sys.executable]
     
-    if os.name == 'nt':
-        subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
-    else:
-        subprocess.Popen(cmd, start_new_session=True)
+    if os.name == 'nt': subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+    else: subprocess.Popen(cmd, start_new_session=True)
         
-    sys.exit(0)
-    
 except Exception as e:
-    print(f"[A] Error: {{e}}")
-    if os.path.exists(UPDATE_DIR): shutil.rmtree(UPDATE_DIR)
+    print(f"Update Prep Error: {{e}}")
 \"\"\"
     with open("update_script_A.py", "w", encoding="utf-8") as f:
         f.write(script_a)
 
-# --- MONITORING ---
-def format_uptime(start_ts):
-    if not start_ts: return "0s"
-    seconds = int(time.time() - (start_ts / 1000))
-    if seconds < 60: return f"{{seconds}}s"
-    if seconds < 3600: return f"{{seconds // 60}}m"
-    if seconds < 86400: return f"{{seconds // 3600}}h"
-    return f"{{seconds // 86400}}d"
-
-def get_pm2_stats():
-    try:
-        if os.name == 'nt':
-            cmd = ['pm2', 'jlist'] 
-            result = subprocess.check_output(cmd, shell=True)
-        else:
-            result = subprocess.check_output(['pm2', 'jlist'])
-        processes = json.loads(result)
-        proc_list = []
-        for p in processes:
-            env = p.get('pm2_env', {{}})
-            monit = p.get('monit', {{}})
-            status = env.get('status')
-            if status not in ['online', 'stopped', 'errored', 'launching']:
-                status = 'stopped'
-            proc_list.append({{
-                "pid": p.get("pid", 0),
-                "name": p.get("name", "unknown"),
-                "pm_id": p.get("pm_id", 0),
-                "status": status,
-                "cpu": monit.get("cpu", 0),
-                "memory": round(monit.get("memory", 0) / 1024 / 1024, 1),
-                "uptime": format_uptime(env.get("pm_uptime", 0)),
-                "restarts": env.get("restart_time", 0),
-                "logs": [] 
-            }})
-        return proc_list
-    except:
-        return []
-
-def get_system_stats():
-    cpu_pct = psutil.cpu_percent(interval=None)
-    mem = psutil.virtual_memory()
-    net1 = psutil.net_io_counters()
-    time.sleep(1) 
-    net2 = psutil.net_io_counters()
-    net_in = (net2.bytes_recv - net1.bytes_recv) / 1024
-    net_out = (net2.bytes_sent - net1.bytes_sent) / 1024
-    disk = psutil.disk_usage('/')
-    temp = 0
-    if hasattr(psutil, "sensors_temperatures"):
-        temps = psutil.sensors_temperatures()
-        if temps:
-            for name in ['cpu_thermal', 'coretemp', 'k10temp', 'package_id_0']:
-                if name in temps:
-                    temp = temps[name][0].current
-                    break
-    return {{
-        "cpuUsage": cpu_pct,
-        "memoryUsage": mem.percent,
-        "memoryUsed": round((mem.total - mem.available) / (1024**3), 2),
-        "memoryTotal": round(mem.total / (1024**3), 2),
-        "temperature": temp,
-        "networkIn": round(net_in, 1),
-        "networkOut": round(net_out, 1),
-        "diskUsage": disk.percent
-    }}
-
-def get_hardware_info():
-    storage_info = []
-    try:
-        partitions = psutil.disk_partitions(all=False)
-        for part in partitions:
-            try:
-                usage = psutil.disk_usage(part.mountpoint)
-                model = "Generic Storage"
-                if platform.system() == 'Linux':
-                    try:
-                        device_name = part.device.split('/')[-1]
-                        block_device = ''.join([i for i in device_name if not i.isdigit()])
-                        model_path = f"/sys/class/block/{{block_device}}/device/model"
-                        if os.path.exists(model_path):
-                            with open(model_path, 'r') as f:
-                                model = f.read().strip()
-                    except: pass
-                storage_info.append({{
-                    "name": part.device,
-                    "model": model,
-                    "size": f"{{round(usage.total / (1024**3), 1)}} GB",
-                    "type": part.fstype,
-                    "interface": part.mountpoint,
-                    "usage": usage.percent
-                }})
-            except: continue
-    except: pass
-    try:
-        mem = psutil.virtual_memory()
-        cpu_freq = psutil.cpu_freq()
-        return {{
-            "cpu": {{
-                "model": platform.processor() or "Unknown CPU",
-                "cores": psutil.cpu_count(logical=False) or 0,
-                "threads": psutil.cpu_count(logical=True) or 0,
-                "architecture": platform.machine(),
-                "baseSpeed": f"{{cpu_freq.max:.1f}}Mhz" if cpu_freq else "N/A"
-            }},
-            "memory": {{
-                "total": f"{{round(mem.total / (1024**3), 1)}} GB",
-                "type": "System RAM",
-                "speed": "Unknown",
-                "formFactor": "DIMM"
-            }},
-            "gpu": {{ "model": "Integrated/Unknown", "vram": "Shared", "driver": "N/A" }},
-            "storage": storage_info
-        }}
-    except:
-        return {{ "cpu": {{}}, "memory": {{}}, "gpu": {{}}, "storage": [] }}
-
 def monitor_local_system():
     device_id = 'server-local'
-    hardware_info = get_hardware_info()
     while True:
         try:
-            stats = get_system_stats()
-            pm2_procs = get_pm2_stats()
+            cpu_pct = psutil.cpu_percent(interval=None)
+            mem = psutil.virtual_memory()
+            net1 = psutil.net_io_counters()
+            time.sleep(1)
+            net2 = psutil.net_io_counters()
+            net_in = (net2.bytes_recv - net1.bytes_recv) / 1024
+            net_out = (net2.bytes_sent - net1.bytes_sent) / 1024
+            
+            # Local PM2 Check
+            pm2_procs = []
+            try:
+                if os.name == 'nt': res = subprocess.check_output(['pm2', 'jlist'], shell=True)
+                else: res = subprocess.check_output(['pm2', 'jlist'])
+                for p in json.loads(res):
+                    pm2_procs.append({{
+                        "pid": p.get("pid"), "name": p.get("name"), "pm_id": p.get("pm_id"),
+                        "status": p.get('pm2_env', {{}}).get('status', 'stopped'),
+                        "cpu": p.get('monit', {{}}).get('cpu', 0),
+                        "memory": round(p.get('monit', {{}}).get('memory', 0)/1024/1024, 1),
+                        "uptime": "0s", "restarts": p.get('pm2_env', {{}}).get('restart_time', 0)
+                    }})
+            except: pass
+
+            stats = {{
+                "cpuUsage": cpu_pct, "memoryUsage": mem.percent,
+                "memoryUsed": round((mem.total - mem.available) / (1024**3), 2),
+                "memoryTotal": round(mem.total / (1024**3), 2),
+                "temperature": 0, "networkIn": round(net_in, 1), "networkOut": round(net_out, 1),
+                "diskUsage": psutil.disk_usage('/').percent
+            }}
+            
+            hw = {{
+                "cpu": {{ "model": platform.processor(), "cores": psutil.cpu_count(), "architecture": platform.machine() }},
+                "memory": {{ "total": f"{{round(mem.total / (1024**3), 1)}} GB" }},
+                "storage": []
+            }}
+
             now_str = datetime.now().strftime('%H:%M:%S')
-            current_time = time.time()
             if device_id not in devices_store:
                 devices_store[device_id] = {{
-                    'id': device_id, 'name': 'Local Server', 'ip': '127.0.0.1',
-                    'os': f"{{platform.system()}} {{platform.release()}}",
-                    'status': 'online', 'lastSeen': current_time,
-                    'stats': stats, 'processes': pm2_procs, 'hardware': hardware_info,
+                    'id': device_id, 'name': 'Local Server', 'ip': '127.0.0.1', 'os': platform.system(),
+                    'status': 'online', 'lastSeen': time.time(), 'stats': stats, 'processes': pm2_procs, 'hardware': hw,
                     'history': {{ 'cpu': [], 'memory': [], 'network': [] }}
                 }}
             else:
                 dev = devices_store[device_id]
-                dev['status'] = 'online'
-                dev['lastSeen'] = current_time
-                dev['stats'] = stats
-                dev['processes'] = pm2_procs
-            
-            dev = devices_store[device_id]
-            dev['history']['cpu'].append({{ 'time': now_str, 'value': stats.get('cpuUsage', 0) }})
-            dev['history']['memory'].append({{ 'time': now_str, 'value': stats.get('memoryUsage', 0) }})
-            dev['history']['network'].append({{ 'time': now_str, 'value': stats.get('networkIn', 0) }})
-            for key in ['cpu', 'memory', 'network']:
-                if len(dev['history'][key]) > MAX_HISTORY: dev['history'][key] = dev['history'][key][-MAX_HISTORY:]
-        except Exception as e: print(f"Monitor error: {{e}}")
-        time.sleep(2)
+                dev['status'] = 'online'; dev['lastSeen'] = time.time(); dev['stats'] = stats; dev['processes'] = pm2_procs
+                dev['history']['cpu'].append({{ 'time': now_str, 'value': stats.get('cpuUsage', 0) }})
+                if len(dev['history']['cpu']) > MAX_HISTORY: dev['history']['cpu'] = dev['history']['cpu'][-MAX_HISTORY:]
+
+        except Exception as e: print(f"Monitor error: {{e}}"); time.sleep(1)
 
 @app.route('/api/auth/check', methods=['GET'])
 def check_setup():
@@ -388,153 +249,6 @@ def login():
     if user: return jsonify(user)
     return jsonify({{'error': 'Invalid credentials'}}), 401
 
-@app.route('/api/auth/register', methods=['POST'])
-def register():
-    data = request.json
-    code = data.get('code')
-    invites = load_json(INVITES_FILE, [])
-    invite = next((i for i in invites if i['code'] == code), None)
-    if not invite: return jsonify({{'error': 'Invalid code'}}), 400
-    users = load_json(USERS_FILE, [])
-    if any(u['username'] == data['username'] for u in users): return jsonify({{'error': 'Username taken'}}), 400
-    new_user = {{ 'id': str(uuid.uuid4()), 'username': data['username'], 'password': data['password'], 'role': invite['role'], 'joinedAt': datetime.now().isoformat() }}
-    users.append(new_user)
-    save_json(USERS_FILE, users)
-    invites = [i for i in invites if i['code'] != code]
-    save_json(INVITES_FILE, invites)
-    return jsonify(new_user)
-
-@app.route('/api/users', methods=['GET'])
-def get_users():
-    users = load_json(USERS_FILE, [])
-    return jsonify([{{k:v for k,v in u.items() if k != 'password'}} for u in users])
-
-@app.route('/api/invites', methods=['GET', 'POST'])
-def handle_invites():
-    invites = load_json(INVITES_FILE, [])
-    if request.method == 'POST':
-        data = request.json
-        new_invite = {{ 'code': str(int(time.time()))[-6:], 'role': data.get('role', 'Guest'), 'createdBy': data.get('createdBy', 'system'), 'expiresAt': int((time.time() + 300) * 1000) }}
-        invites.append(new_invite)
-        save_json(INVITES_FILE, invites)
-        return jsonify(new_invite)
-    return jsonify(invites)
-
-@app.route('/api/invites/<code>', methods=['DELETE'])
-def delete_invite(code):
-    invites = load_json(INVITES_FILE, [])
-    invites = [i for i in invites if i['code'] != code]
-    save_json(INVITES_FILE, invites)
-    return jsonify({{'status': 'deleted'}})
-
-@app.route('/api/mail/<user_id>', methods=['GET'])
-def get_mails(user_id):
-    all_mails = load_json(MAILS_FILE, [])
-    return jsonify([m for m in all_mails if m['toId'] == user_id or m['fromId'] == user_id])
-
-@app.route('/api/mail', methods=['POST'])
-def send_mail():
-    data = request.json
-    all_mails = load_json(MAILS_FILE, [])
-    new_mail = {{ 'id': f"m-{{int(time.time()*1000)}}", 'fromId': data['fromId'], 'toId': data['toId'], 'subject': data['subject'], 'body': data['body'], 'read': False, 'timestamp': datetime.now().isoformat() }}
-    all_mails.append(new_mail)
-    save_json(MAILS_FILE, all_mails)
-    all_notifs = load_json(NOTIFICATIONS_FILE, [])
-    all_notifs.append({{ 'id': f"n-{{int(time.time()*1000)}}", 'userId': data['toId'], 'type': 'info', 'message': f"New mail received", 'read': False, 'timestamp': datetime.now().isoformat() }})
-    save_json(NOTIFICATIONS_FILE, all_notifs)
-    return jsonify(new_mail)
-
-@app.route('/api/mail/<mail_id>', methods=['DELETE'])
-def delete_mail(mail_id):
-    all_mails = load_json(MAILS_FILE, [])
-    all_mails = [m for m in all_mails if m['id'] != mail_id]
-    save_json(MAILS_FILE, all_mails)
-    return jsonify({{'status': 'deleted'}})
-
-@app.route('/api/mail/<user_id>/read-all', methods=['PUT'])
-def mark_all_mails_read(user_id):
-    all_mails = load_json(MAILS_FILE, [])
-    for m in all_mails:
-        if m['toId'] == user_id: m['read'] = True
-    save_json(MAILS_FILE, all_mails)
-    return jsonify({{'status': 'success'}})
-
-@app.route('/api/notifications/<user_id>', methods=['GET'])
-def get_notifications(user_id):
-    all_notifs = load_json(NOTIFICATIONS_FILE, [])
-    return jsonify([n for n in all_notifs if n['userId'] == user_id])
-
-@app.route('/api/notifications/<notif_id>/read', methods=['PUT'])
-def mark_notification_read(notif_id):
-    all_notifs = load_json(NOTIFICATIONS_FILE, [])
-    for n in all_notifs:
-        if n['id'] == notif_id:
-            n['read'] = True; break
-    save_json(NOTIFICATIONS_FILE, all_notifs)
-    return jsonify({{'status': 'success'}})
-
-@app.route('/api/notifications/<notif_id>', methods=['DELETE'])
-def delete_notification(notif_id):
-    all_notifs = load_json(NOTIFICATIONS_FILE, [])
-    all_notifs = [n for n in all_notifs if n['id'] != notif_id]
-    save_json(NOTIFICATIONS_FILE, all_notifs)
-    return jsonify({{'status': 'deleted'}})
-
-@app.route('/api/notifications/<user_id>/clear', methods=['DELETE'])
-def clear_all_notifications(user_id):
-    all_notifs = load_json(NOTIFICATIONS_FILE, [])
-    all_notifs = [n for n in all_notifs if n['userId'] != user_id]
-    save_json(NOTIFICATIONS_FILE, all_notifs)
-    return jsonify({{'status': 'cleared'}})
-
-@app.route('/api/telemetry', methods=['GET', 'POST'])
-def receive_telemetry():
-    if request.method == 'GET':
-        return jsonify({{'status': 'active', 'message': 'Telemetry endpoint operational. Send POST data to update.'}})
-
-    try:
-        data = request.json
-        device_id = data.get('id')
-        if not device_id: return jsonify({{'error': 'Device ID required'}}), 400
-        current_time = time.time()
-        now_str = datetime.now().strftime('%H:%M:%S')
-        
-        # Check if there is a pending update command for this device
-        response_data = {{'status': 'success'}}
-        if device_id in pending_updates:
-            print(f"Sending update command to {{device_id}}")
-            response_data['command'] = 'update'
-            response_data['repoUrl'] = pending_updates[device_id]['url']
-            response_data['token'] = pending_updates[device_id]['token']
-            del pending_updates[device_id]
-        elif server_settings.get('autoUpdateDevices', False) and update_cache['status'] == 'update-available':
-             # Auto update logic could be refined to check device version vs server
-             pass
-
-        if device_id not in devices_store:
-            devices_store[device_id] = {{ 'id': device_id, 'name': data.get('name', device_id), 'ip': request.remote_addr, 'os': data.get('os', 'Unknown'), 'status': 'online', 'lastSeen': current_time, 'stats': data.get('stats', {{}}), 'processes': data.get('processes', []), 'hardware': data.get('hardware', {{}}), 'history': {{ 'cpu': [], 'memory': [], 'network': [] }} }}
-        else:
-            dev = devices_store[device_id]
-            dev['status'] = 'online'; dev['lastSeen'] = current_time; dev['stats'] = data.get('stats', dev['stats']); dev['processes'] = data.get('processes', dev['processes']); dev['hardware'] = data.get('hardware', dev['hardware'])
-        
-        # Mark update available if server detects a newer hash and thinks device is old (Simplified logic: if server has update, devices might too)
-        if update_cache['status'] == 'update-available':
-             devices_store[device_id]['updateAvailable'] = True
-        else:
-             devices_store[device_id]['updateAvailable'] = False
-
-        dev = devices_store[device_id]
-        stats = dev['stats']
-        if stats:
-            dev['history']['cpu'].append({{ 'time': now_str, 'value': stats.get('cpuUsage', 0) }})
-            dev['history']['memory'].append({{ 'time': now_str, 'value': stats.get('memoryUsage', 0) }})
-            dev['history']['network'].append({{ 'time': now_str, 'value': stats.get('networkIn', 0) }})
-            for key in ['cpu', 'memory', 'network']:
-                if len(dev['history'][key]) > MAX_HISTORY: dev['history'][key] = dev['history'][key][-MAX_HISTORY:]
-        
-        return jsonify(response_data)
-    except Exception as e: return jsonify({{'error': str(e)}}), 500
-
 @app.route('/api/devices', methods=['GET'])
 def get_devices():
     results = []
@@ -544,33 +258,61 @@ def get_devices():
         results.append(dev)
     return jsonify(results)
 
-@app.route('/api/devices/update', methods=['POST'])
-def trigger_device_update():
+@app.route('/api/devices/power', methods=['POST'])
+def device_power_action():
     data = request.json
-    device_id = data.get('deviceId') # 'all' or specific ID
-    repo_url = server_settings.get('repoUrl')
-    token = server_settings.get('githubToken', '')
+    device_id = data.get('deviceId')
+    action = data.get('action') # 'reboot' or 'shutdown'
     
-    if not repo_url: return jsonify({{'error': 'Repository not configured'}}), 400
-    
-    if device_id == 'all':
-        for d_id in devices_store.keys():
-            if d_id != 'server-local':
-                pending_updates[d_id] = {{ 'url': repo_url, 'token': token }}
-        return jsonify({{'status': 'queued_all'}})
-    else:
-        pending_updates[device_id] = {{ 'url': repo_url, 'token': token }}
-        return jsonify({{'status': 'queued', 'device': device_id}})
+    if not device_id or action not in ['reboot', 'shutdown']:
+        return jsonify({{'error': 'Invalid parameters'}}), 400
+        
+    # Queue command
+    pending_commands[device_id] = action
+    print(f"Queued {{action}} for device {{device_id}}")
+    return jsonify({{'status': 'queued'}})
 
-@app.route('/api/settings', methods=['POST'])
-def update_settings():
-    data = request.json
-    global server_settings
-    server_settings.update(data)
-    save_json(SETTINGS_FILE, server_settings)
-    # Force a re-check on next update polling by expiring the cache
-    update_cache['last_check'] = 0 
-    return jsonify({{'status': 'success', 'settings': server_settings}})
+@app.route('/api/telemetry', methods=['GET', 'POST'])
+def receive_telemetry():
+    if request.method == 'GET':
+        return jsonify({{'status': 'active', 'message': 'Endpoint ready.'}})
+    
+    try:
+        data = request.json
+        d_id = data.get('id')
+        
+        response = {{'status': 'success'}}
+
+        # Check for Pending Power Commands
+        if d_id in pending_commands:
+            response['command'] = pending_commands[d_id]
+            print(f"[Telemetry] Sending {{pending_commands[d_id]}} to {{d_id}}")
+            del pending_commands[d_id]
+        
+        # Check for Pending Updates
+        if d_id in pending_updates:
+            response['command'] = 'update'
+            response['repoUrl'] = pending_updates[d_id]['url']
+            response['token'] = pending_updates[d_id]['token']
+            del pending_updates[d_id]
+
+        if d_id not in devices_store:
+            devices_store[d_id] = {{ 'id': d_id, 'name': data.get('name', d_id), 'ip': request.remote_addr, 'os': data.get('os', 'Unknown'), 'status': 'online', 'lastSeen': time.time(), 'stats': data.get('stats', {{}}), 'processes': data.get('processes', []), 'hardware': data.get('hardware', {{}}), 'history': {{ 'cpu': [], 'memory': [], 'network': [] }} }}
+        else:
+            dev = devices_store[d_id]
+            dev['status'] = 'online'; dev['lastSeen'] = time.time(); dev['stats'] = data.get('stats'); dev['processes'] = data.get('processes')
+            
+            now_str = datetime.now().strftime('%H:%M:%S')
+            stats = data.get('stats', {{}})
+            dev['history']['cpu'].append({{ 'time': now_str, 'value': stats.get('cpuUsage', 0) }})
+            dev['history']['memory'].append({{ 'time': now_str, 'value': stats.get('memoryUsage', 0) }})
+            if len(dev['history']['cpu']) > MAX_HISTORY: 
+                dev['history']['cpu'] = dev['history']['cpu'][-MAX_HISTORY:]
+                dev['history']['memory'] = dev['history']['memory'][-MAX_HISTORY:]
+
+        return jsonify(response)
+    except Exception as e:
+        return jsonify({{'error': str(e)}}), 500
 
 @app.route('/api/update/check', methods=['GET'])
 def check_update():
@@ -582,8 +324,6 @@ def check_update():
     force = request.args.get('force') == 'true'
     now = time.time()
     
-    # Check if we should fetch new data (cache expired or forced)
-    # Cache duration: 60 seconds (Standard)
     if force or (now - update_cache['last_check'] > 60):
         update_cache['last_check'] = now
         update_cache['error'] = None
@@ -596,8 +336,7 @@ def check_update():
                     
                     api_url = f"https://api.github.com/repos/{{owner}}/{{repo}}/commits/main"
                     headers = {{}}
-                    if github_token:
-                        headers['Authorization'] = f"token {{github_token}}"
+                    if github_token: headers['Authorization'] = f"token {{github_token}}"
                     
                     r = requests.get(api_url, headers=headers, timeout=5)
                     
@@ -606,39 +345,29 @@ def check_update():
                         remote_hash = data.get('sha')
                         update_cache['remote_hash'] = remote_hash
                         
-                        # Get changed files if hashes differ
                         if remote_hash and remote_hash != local_hash:
                             update_cache['status'] = "update-available"
-                            # Fetch commit details to get file list
                             r_commit = requests.get(data.get('url'), headers=headers, timeout=5)
                             if r_commit.status_code == 200:
                                 files = r_commit.json().get('files', [])
                                 update_cache['changed_files'] = [f['filename'] for f in files]
                             else:
-                                update_cache['changed_files'] = ["Unable to list files"]
+                                update_cache['changed_files'] = []
                         else:
                             update_cache['status'] = "up-to-date"
                             update_cache['changed_files'] = []
-                    elif r.status_code == 403 or r.status_code == 429:
-                        update_cache['error'] = "GitHub Rate Limited (Add Token)"
                     else:
                          update_cache['error'] = f"GitHub Error {{r.status_code}}"
             else:
                 update_cache['status'] = "up-to-date"
-                update_cache['remote_hash'] = None
         except Exception as e:
             update_cache['error'] = str(e)
             
     return jsonify({{
         "status": update_cache['status'],
-        "currentVersion": local_hash[:7],
-        "availableVersion": update_cache['remote_hash'][:7] if update_cache['remote_hash'] else "Unknown",
-        "lastChecked": datetime.fromtimestamp(update_cache['last_check']).strftime("%H:%M:%S"),
-        "repoUrl": repo_url,
         "localHash": local_hash,
         "remoteHash": update_cache['remote_hash'],
         "error": update_cache['error'],
-        "githubToken": github_token[:4] + "..." if github_token else "",
         "changedFiles": update_cache['changed_files']
     }})
 
@@ -649,23 +378,22 @@ def execute_update():
     if not repo_url: return jsonify({{"error": "No repo URL"}}), 400
     create_updater_scripts()
     
-    try:
-        parts = repo_url.rstrip('/').split('/')
-        owner, repo = parts[-2], parts[-1]
-        if repo.endswith('.git'): repo = repo[:-4]
-        headers = {{}}
-        if token: headers['Authorization'] = f"token {{token}}"
-        
-        r = requests.get(f"https://api.github.com/repos/{{owner}}/{{repo}}/commits/main", headers=headers)
-        if r.status_code == 200:
-            new_hash = r.json().get('sha')
-            server_settings['localHash'] = new_hash
-            save_json(SETTINGS_FILE, server_settings)
-    except: pass
-
     def trigger():
-        time.sleep(2)
+        time.sleep(1)
+        # Update local hash before killing server to prevent re-update loop
+        try:
+             # Basic fetch to get new hash
+             parts = repo_url.rstrip('/').split('/')
+             owner, repo = parts[-2], parts[-1]
+             if repo.endswith('.git'): repo = repo[:-4]
+             r = requests.get(f"https://api.github.com/repos/{{owner}}/{{repo}}/commits/main", headers={{'Authorization': f'token {{token}}'}} if token else {{}})
+             if r.status_code == 200:
+                 server_settings['localHash'] = r.json().get('sha')
+                 save_json(SETTINGS_FILE, server_settings)
+        except: pass
+        
         subprocess.Popen([sys.executable, "update_script_A.py", repo_url, token, str(os.getpid())])
+    
     threading.Thread(target=trigger).start()
     return jsonify({{"status": "Update started"}})
 
@@ -673,134 +401,40 @@ def execute_update():
 def power_ops():
     data = request.json
     action = data.get('action')
-    if action == 'shutdown':
-        def do_shutdown():
-            time.sleep(1)
-            if os.name == 'nt': os.system('shutdown /s /t 0')
-            else: os.system('shutdown -h now')
-        threading.Thread(target=do_shutdown).start()
-        return jsonify({{'status': 'Shutting down...'}})
-    elif action == 'restart':
-        def do_restart():
-            # Create a self-restarting mechanism
-            # We create a temporary script 'restarter.py' that waits for this PID to die, then starts the server again
-            restarter_code = \"\"\"
-import os
-import sys
-import time
-import subprocess
+    # Server power ops not fully implemented in this safe version
+    return jsonify({{'status': 'Simulated Server Power Action'}})
 
-pid = int(sys.argv[1])
-cmd = sys.argv[2:]
-
-print(f"Restarter: Waiting for PID {{pid}} to exit...")
-try:
-    while True:
-        try:
-            os.kill(pid, 0)
-            time.sleep(0.5)
-        except OSError:
-            break
-except:
-    pass
-
-print("Restarter: Launching server...")
-# Launch the server detached
-if os.name == 'nt':
-    subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
-else:
-    subprocess.Popen(cmd, start_new_session=True)
-
-# Self-delete (best effort)
-try:
-    os.remove(sys.argv[0])
-except:
-    pass
-\"\"\"
-            try:
-                with open("restarter.py", "w") as f:
-                    f.write(restarter_code)
-                
-                # Get current executable and script arguments
-                # Note: We assume the server was started as `python pimonitor_server.py`
-                # If packaged, sys.executable is the app, sys.argv[0] might be irrelevant.
-                # Standard python usage: sys.executable is python, sys.argv[0] is script
-                current_args = [sys.executable, sys.argv[0]]
-                
-                cmd = [sys.executable, "restarter.py", str(os.getpid())] + current_args
-                
-                if os.name == 'nt':
-                    subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
-                else:
-                    subprocess.Popen(cmd, start_new_session=True)
-                    
-                time.sleep(1)
-                os._exit(0) # Hard exit to ensure PID dies
-            except Exception as e:
-                print(f"Restart failed: {{e}}")
-
-        threading.Thread(target=do_restart).start()
-        return jsonify({{'status': 'Restarting process...'}})
-    return jsonify({{'error': 'Invalid action'}}), 400
-
-# --- MAIN ---
 @app.route('/')
 def serve_index():
     if os.path.exists(os.path.join(DIST_DIR, 'index.html')): return send_from_directory(DIST_DIR, 'index.html')
-    return "Server Running. Build frontend to see dashboard.", 200
+    return "PiMonitor Server Running. Please build the React frontend.", 200
 
 @app.route('/<path:path>')
 def serve_static(path):
     if os.path.exists(os.path.join(DIST_DIR, path)): return send_from_directory(DIST_DIR, path)
-    if os.path.exists(os.path.join(DIST_DIR, 'index.html')): return send_from_directory(DIST_DIR, 'index.html')
     return serve_index()
 
 def get_all_ips():
-    ips = []
+    ips = ['127.0.0.1']
     try:
-        # Method 1: Hostname resolution (often gets localhost or 127.0.1.1)
-        hostname = socket.gethostname()
-        try:
-            ips.append(socket.gethostbyname(hostname))
-        except: pass
-        
-        # Method 2: Connect to external (reliable for main interface)
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try: 
-            s.connect(('10.255.255.255', 1))
-            ip = s.getsockname()[0]
-            if ip not in ips: ips.append(ip)
-        except: pass
-        finally: s.close()
-        
-        # Method 3: Parse psutil if available (most robust)
-        if hasattr(psutil, "net_if_addrs"):
-            for interface, snics in psutil.net_if_addrs().items():
-                for snic in snics:
-                    if snic.family == socket.AF_INET:
-                        if snic.address != '127.0.0.1' and snic.address not in ips:
-                            ips.append(snic.address)
+        s.connect(('10.255.255.255', 1))
+        ips.append(s.getsockname()[0])
+        s.close()
     except: pass
-    
-    return ips if ips else ['127.0.0.1']
+    return ips
 
 if __name__ == '__main__':
     ensure_data_dir()
     ips = get_all_ips()
-    print(f"==================================================")
-    print(f"PiMonitor Server Running on Port {{PORT}}")
-    print(f"==================================================")
-    print(f"Local Access: http://127.0.0.1:{{PORT}}")
-    print(f"Network Access:")
-    for ip in ips:
-        if ip != '127.0.0.1':
-            print(f"  - http://{{ip}}:{{PORT}}")
-    print(f"==================================================")
-    
+    print(f"------------------------------------------------")
+    print(f"PiMonitor Server running on port {{PORT}}")
+    print(f"Addresses:")
+    for ip in ips: print(f"  http://{{ip}}:{{PORT}}")
+    print(f"------------------------------------------------")
     threading.Thread(target=monitor_local_system, daemon=True).start()
     app.run(host='0.0.0.0', port=PORT)
 """
-    
     filename = "pimonitor_server.py"
     with open(filename, "w", encoding="utf-8") as f:
         f.write(code)
@@ -809,8 +443,8 @@ if __name__ == '__main__':
 def main():
     clear_screen()
     print("Generating Server Script...")
-    script_name = generate_server_script(3000)
-    print(f"Done: {script_name}")
+    generate_server_script(3000)
+    print("Done: pimonitor_server.py")
 
 if __name__ == "__main__":
     main()
