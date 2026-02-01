@@ -32,6 +32,7 @@ import psutil
 import platform
 import mimetypes
 import subprocess
+import signal
 from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 from datetime import datetime
@@ -102,11 +103,22 @@ import sys
 import time
 import shutil
 import subprocess
+import signal
 
 PID = int(sys.argv[1])
 UPDATE_DIR = sys.argv[2]
 TARGET_DIR = sys.argv[3]
 RESTART_CMD = sys.argv[4:]
+
+print(f"[B] Killing Server PID {{PID}}...")
+try:
+    if os.name == 'nt':
+        # Force kill on windows to release file locks
+        subprocess.call(['taskkill', '/F', '/PID', str(PID)])
+    else:
+        os.kill(PID, signal.SIGKILL)
+except Exception as e:
+    print(f"Kill failed (process might be dead): {{e}}")
 
 print(f"[B] Waiting for Server PID {{PID}} to exit...")
 try:
@@ -157,6 +169,8 @@ import shutil
 
 URL = sys.argv[1]
 TOKEN = sys.argv[2] if len(sys.argv) > 2 else ""
+SERVER_PID = sys.argv[3] if len(sys.argv) > 3 else str(os.getpid())
+
 TARGET_DIR = os.getcwd()
 UPDATE_DIR = os.path.join(TARGET_DIR, "temp_update")
 
@@ -185,7 +199,7 @@ try:
             shutil.move(os.path.join(root, item), UPDATE_DIR)
         os.rmdir(root)
         
-    cmd = [sys.executable, "update_script_B.py", str(os.getpid()), UPDATE_DIR, TARGET_DIR, sys.executable, "pimonitor_server.py"]
+    cmd = [sys.executable, "update_script_B.py", SERVER_PID, UPDATE_DIR, TARGET_DIR, sys.executable, "pimonitor_server.py"]
     
     if os.name == 'nt':
         subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
@@ -327,6 +341,10 @@ def monitor_local_system():
             pm2_procs = get_pm2_stats()
             now_str = datetime.now().strftime('%H:%M:%S')
             current_time = time.time()
+            
+            # Check for server pending updates (self-update)
+            # Not implemented in telemetry loop, handled by manual trigger route
+            
             if device_id not in devices_store:
                 devices_store[device_id] = {{
                     'id': device_id, 'name': 'Local Server', 'ip': '127.0.0.1',
@@ -648,7 +666,9 @@ def execute_update():
 
     def trigger():
         time.sleep(2)
-        subprocess.Popen([sys.executable, "update_script_A.py", repo_url, token])
+        # Pass the current PID so the updater can kill it
+        subprocess.Popen([sys.executable, "update_script_A.py", repo_url, token, str(os.getpid())])
+        
     threading.Thread(target=trigger).start()
     return jsonify({{"status": "Update started"}})
 
