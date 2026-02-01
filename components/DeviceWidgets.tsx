@@ -13,21 +13,15 @@ import { Device, HardwareSpecs } from '../types';
 export const InfoRow: React.FC<{ label: string; value: string | number }> = ({ label, value }) => (
   <div className="flex justify-between items-center py-2 border-b border-slate-800 last:border-0">
     <span className="text-sm text-slate-500">{label}</span>
-    <span className="text-sm font-medium text-white text-right">{value}</span>
+    <span className="text-sm font-medium text-white text-right">{value || "N/A"}</span>
   </div>
 );
 
 export const StorageItem: React.FC<{ drive: HardwareSpecs['storage'][0]; t: any }> = ({ drive, t }) => {
     const [expanded, setExpanded] = useState(false);
     
-    // Use real usage if available, else fallback to 0
     const realUsage = drive.usage !== undefined ? Math.round(drive.usage) : 0;
-    
-    // Simulate other partition distribution just for visual variety if real breakdown not available
-    // But ensure 'Used' matches the real usage.
     const usedPercent = realUsage; 
-    const dataPercent = 0; // Simplified for now as we only get total mount usage
-    const swapPercent = 0;
     const freePercent = 100 - usedPercent;
 
     return (
@@ -91,11 +85,11 @@ export const StorageItem: React.FC<{ drive: HardwareSpecs['storage'][0]; t: any 
                             <div style={{ width: `${freePercent}%` }} className="h-full bg-slate-700" />
                         </div>
                         <div className="flex gap-4 mt-2 flex-wrap">
-                             <div className="flex items-center gap-1.5" title={`${t.system} Partition`}>
+                             <div className="flex items-center gap-1.5" title="Used Space">
                                 <div className={`w-2 h-2 rounded-full ${usedPercent > 90 ? 'bg-rose-500' : 'bg-blue-500'}`} />
                                 <span className="text-[10px] text-slate-400">{t.system || "Used"} ({usedPercent}%)</span>
                              </div>
-                             <div className="flex items-center gap-1.5" title={`${t.free} Space`}>
+                             <div className="flex items-center gap-1.5" title="Free Space">
                                 <div className="w-2 h-2 rounded-full bg-slate-700" />
                                 <span className="text-[10px] text-slate-400">{t.free || "Free"} ({freePercent}%)</span>
                              </div>
@@ -108,6 +102,8 @@ export const StorageItem: React.FC<{ drive: HardwareSpecs['storage'][0]; t: any 
 };
 
 export const DeviceHardware: React.FC<{ hardware: HardwareSpecs; t: any }> = ({ hardware, t }) => {
+   if (!hardware) return <div className="p-6 text-center text-slate-500">No Hardware Data Available</div>;
+
    return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in duration-300">
        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
@@ -115,10 +111,10 @@ export const DeviceHardware: React.FC<{ hardware: HardwareSpecs; t: any }> = ({ 
            <Cpu size={20} className="text-purple-400" /> {t.processor}
          </h3>
          <div className="flex flex-col">
-            <InfoRow label={t.model} value={hardware.cpu.model} />
-            <InfoRow label={t.coresThreads} value={`${hardware.cpu.cores} / ${hardware.cpu.threads}`} />
-            <InfoRow label={t.baseSpeed} value={hardware.cpu.baseSpeed} />
-            <InfoRow label={t.architecture} value={hardware.cpu.architecture} />
+            <InfoRow label={t.model} value={hardware.cpu?.model} />
+            <InfoRow label={t.coresThreads} value={`${hardware.cpu?.cores || '?'} / ${hardware.cpu?.threads || '?'}`} />
+            <InfoRow label={t.baseSpeed} value={hardware.cpu?.baseSpeed} />
+            <InfoRow label={t.architecture} value={hardware.cpu?.architecture} />
          </div>
        </div>
        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
@@ -126,10 +122,10 @@ export const DeviceHardware: React.FC<{ hardware: HardwareSpecs; t: any }> = ({ 
            <Database size={20} className="text-amber-400" /> {t.memoryRam}
          </h3>
          <div className="flex flex-col">
-            <InfoRow label={t.totalCapacity} value={hardware.memory.total} />
-            <InfoRow label={t.type} value={hardware.memory.type} />
-            <InfoRow label={t.speed} value={hardware.memory.speed} />
-            <InfoRow label={t.formFactor} value={hardware.memory.formFactor} />
+            <InfoRow label={t.totalCapacity} value={hardware.memory?.total} />
+            <InfoRow label={t.type} value={hardware.memory?.type} />
+            <InfoRow label={t.speed} value={hardware.memory?.speed} />
+            <InfoRow label={t.formFactor} value={hardware.memory?.formFactor} />
          </div>
        </div>
        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
@@ -137,9 +133,9 @@ export const DeviceHardware: React.FC<{ hardware: HardwareSpecs; t: any }> = ({ 
            <Monitor size={20} className="text-blue-400" /> {t.graphics}
          </h3>
          <div className="flex flex-col">
-            <InfoRow label={t.model} value={hardware.gpu.model} />
-            <InfoRow label={t.vram} value={hardware.gpu.vram} />
-            <InfoRow label={t.driver} value={hardware.gpu.driver} />
+            <InfoRow label={t.model} value={hardware.gpu?.model} />
+            <InfoRow label={t.vram} value={hardware.gpu?.vram} />
+            <InfoRow label={t.driver} value={hardware.gpu?.driver} />
          </div>
        </div>
        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
@@ -147,9 +143,13 @@ export const DeviceHardware: React.FC<{ hardware: HardwareSpecs; t: any }> = ({ 
            <HardDrive size={20} className="text-emerald-400" /> {t.storage}
          </h3>
          <div className="flex flex-col">
-            {hardware.storage.map((drive, i) => (
-                <StorageItem key={i} drive={drive} t={t} />
-            ))}
+            {hardware.storage?.length > 0 ? (
+                hardware.storage.map((drive, i) => (
+                    <StorageItem key={i} drive={drive} t={t} />
+                ))
+            ) : (
+                <div className="text-sm text-slate-500 text-center py-2">No storage detected</div>
+            )}
          </div>
        </div>
     </div>
@@ -159,7 +159,7 @@ export const DeviceHardware: React.FC<{ hardware: HardwareSpecs; t: any }> = ({ 
 export const DeviceTerminal: React.FC<{ device: Device }> = ({ device }) => {
   const [history, setHistory] = useState<Array<{ type: 'input' | 'output', content: string }>>([
     { type: 'output', content: `Connected to ${device.name} (${device.ip})` },
-    { type: 'output', content: `PiMonitor Agent v1.0.2 active` },
+    { type: 'output', content: `PiMonitor Agent v1.0.3 active` },
     { type: 'output', content: `Type 'help' for available commands.` }
   ]);
   const [commandBuffer, setCommandBuffer] = useState<string[]>([]);
