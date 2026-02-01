@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
       body {
         font-family: 'Inter', sans-serif;
@@ -64,6 +64,10 @@
       .slide-in-from-right { animation-name: slideInRight; }
       .ripple-out { animation: rippleOut 1s cubic-bezier(0, 0, 0.2, 1) forwards; }
       .drop-in { animation: dropIn 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+      
+      .delay-100 { animation-delay: 100ms; }
+      .delay-200 { animation-delay: 200ms; }
+      .delay-300 { animation-delay: 300ms; }
     </style>
   <script type="importmap">
 {
@@ -75,8 +79,6 @@
     "recharts": "https://esm.sh/recharts@2.12.0?deps=react@18.2.0,react-dom@18.2.0",
     "lucide-react": "https://esm.sh/lucide-react@0.344.0?deps=react@18.2.0",
     "react-router-dom": "https://esm.sh/react-router-dom@6.22.3?deps=react@18.2.0,react-dom@18.2.0",
-    "xterm": "https://esm.sh/xterm@5.3.0",
-    "xterm-addon-fit": "https://esm.sh/xterm-addon-fit@0.8.0?deps=xterm@5.3.0",
     "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
     "vite": "https://esm.sh/vite@^7.3.1",
     "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2"
