@@ -5,8 +5,8 @@ export default defineConfig({
   plugins: [react()],
   build: {
     rollupOptions: {
-      // Treat these as external so Vite doesn't try to bundle them.
-      // The browser will resolve them via the importmap in index.html.
+      // These libraries are provided via CDN in index.html (importmap)
+      // We must treat them as external so Vite doesn't try (and fail) to bundle them.
       external: [
         'react',
         'react-dom',
@@ -16,7 +16,17 @@ export default defineConfig({
         'lucide-react',
         'xterm',
         'xterm-addon-fit'
-      ]
+      ],
+      output: {
+        globals: {
+          react: 'React',
+          'react-dom': 'ReactDOM',
+          'react-router-dom': 'ReactRouterDOM',
+          recharts: 'Recharts',
+          xterm: 'Terminal',
+          'xterm-addon-fit': 'FitAddon'
+        }
+      }
     }
   }
 });
