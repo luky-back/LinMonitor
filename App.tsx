@@ -149,6 +149,7 @@ const App: React.FC = () => {
 
   const handleDismissUpdate = () => {
       setShowUpdateModal(false);
+      // Temporarily override local status so it doesn't pop up again this session
       setUpdateConfig(prev => ({ ...prev, status: 'up-to-date' }));
   };
 
