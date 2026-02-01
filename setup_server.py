@@ -1,4 +1,4 @@
-import os
+import o
 import sys
 import subprocess
 import time
