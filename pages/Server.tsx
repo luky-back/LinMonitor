@@ -278,7 +278,7 @@ const Server: React.FC<ServerProps> = ({ server, language, settings, currentUser
             onConfirm={handleConfirmAction}
             title={activeAction === 'shutdown' ? t.shutdown : t.restart}
             warning={activeAction === 'shutdown' ? t.shutdownWarning : t.restartWarning}
-            length={activeAction === 'shutdown' ? 15 : 10}
+            length={4} // Reduced from 15/10 to 4
             t={t}
          />
       )}
