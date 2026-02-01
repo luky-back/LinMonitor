@@ -375,6 +375,8 @@ def main():
                             subprocess.Popen([sys.executable, updater_script], start_new_session=True)
                             
                         sys.exit(0)
+            else:
+                print(f"Server returned status: {{r.status_code}}")
             
         except requests.exceptions.ConnectionError:
             print("Server unreachable...")
