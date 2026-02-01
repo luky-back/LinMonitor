@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { 
-  Plus, Terminal, Cpu, Database, Wifi, Trash2, Edit2, Copy, Check, Play, Square, Server, Activity, MoreVertical, Lock, HardDrive, Search, X, CloudDownload, Power, RefreshCw
+  Plus, Terminal, Cpu, Database, Wifi, Trash2, Edit2, Copy, Check, Play, Square, Server, Activity, MoreVertical, Lock, HardDrive, Search, X, Power, RefreshCw
 } from 'lucide-react';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
@@ -11,13 +11,6 @@ import { translations } from '../translations';
 import { DeviceHardware, DeviceTerminal } from '../components/DeviceWidgets';
 import SecurityModal from '../components/SecurityModal';
 import { api } from '../services/api';
-// ... AddDeviceModal, RemoveDeviceModal, ProcessRow components remain same as before ...
-// We just need to ensure we import or define them. For brevity in this response, 
-// I am assuming the previous modal definitions are retained in the full file context 
-// and only showing the core logic changes in Devices component.
-
-// NOTE: Please ensure AddDeviceModal, RemoveDeviceModal, ProcessRow are present in the final file.
-// I am including them below to be safe.
 
 const AddDeviceModal: React.FC<{ isOpen: boolean; onClose: () => void; t: any }> = ({ isOpen, onClose, t }) => {
   if (!isOpen) return null;
@@ -64,22 +57,6 @@ const RemoveDeviceModal: React.FC<{ isOpen: boolean; onClose: () => void; onConf
   );
 };
 
-const ProcessRow: React.FC<any> = ({ process, deviceId, onRename, onAction, isMenuOpen, onToggleMenu, onCloseMenu, compact, t }) => {
-  // Simplified for XML payload size - assume previous implementation logic holds
-  return (
-      <tr className="border-b border-slate-800/50 hover:bg-slate-800/30">
-        <td className="py-2 pl-4 text-slate-200">{process.name}</td>
-        <td className="py-2 text-slate-400 font-mono text-sm">{process.pid}</td>
-        <td className="py-2 text-slate-300 font-mono text-sm">{process.cpu.toFixed(1)}%</td>
-        <td className="py-2 text-slate-300 font-mono text-sm">{process.memory.toFixed(1)} MB</td>
-        <td className="py-2 text-slate-400 text-sm">{process.uptime}</td>
-        <td className="py-2 pr-4 text-right">
-           {/* Actions would be here */}
-        </td>
-      </tr>
-  )
-};
-
 const accentTextMap: Record<string, string> = { blue: 'text-blue-400', purple: 'text-purple-400', emerald: 'text-emerald-400', amber: 'text-amber-400', rose: 'text-rose-400', indigo: 'text-indigo-400', orange: 'text-orange-400' };
 const accentBgMap: Record<string, string> = { blue: 'bg-blue-600', purple: 'bg-purple-600', emerald: 'bg-emerald-600', amber: 'bg-amber-600', rose: 'bg-rose-600', indigo: 'bg-indigo-600', orange: 'bg-orange-600' };
 const accentBorderMap: Record<string, string> = { blue: 'border-blue-600/20 bg-blue-600/10', purple: 'border-purple-600/20 bg-purple-600/10', emerald: 'border-emerald-600/20 bg-emerald-600/10', amber: 'border-amber-600/20 bg-amber-600/10', rose: 'border-rose-600/20 bg-rose-600/10', indigo: 'border-indigo-600/20 bg-indigo-600/10', orange: 'border-orange-600/20 bg-orange-600/10' };
@@ -106,7 +83,6 @@ const Devices: React.FC<DevicesProps> = ({ devices, onRenameDevice, onRenameProc
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isRemoveModalOpen, setIsRemoveModalOpen] = useState(false);
   const [activeAction, setActiveAction] = useState<'reboot' | 'shutdown' | null>(null);
-  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 
   const t = translations[language] || translations['en'];
 
