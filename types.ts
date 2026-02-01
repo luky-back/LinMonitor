@@ -72,6 +72,8 @@ export interface Device {
   };
   hardware: HardwareSpecs;
   resourceLimits?: ResourceLimits;
+  updateAvailable?: boolean; // New field
+  version?: string; // New field
 }
 
 export interface WidgetConfig {
@@ -88,6 +90,8 @@ export interface AppSettings {
     memory: boolean;
     processes: boolean;
   };
+  autoUpdateDevices: boolean; // New setting
+  updateNotifications: boolean; // New setting
 }
 
 export enum Tab {
@@ -155,4 +159,5 @@ export interface UpdateConfig {
   currentVersion?: string;
   error?: string;
   githubToken?: string;
+  changedFiles?: string[]; // New field for listing specific changes
 }
