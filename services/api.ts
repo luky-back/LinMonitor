@@ -2,15 +2,10 @@ import { Device, User, InviteCode, Mail, Notification, UpdateConfig, AppSettings
 
 const STORAGE_KEY = 'pimonitor_api_url';
 
-// Helper to determine initial URL
 const getInitialBaseUrl = () => {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored) return stored;
-  
-  if (window.location.port === '5173') {
-    return 'http://127.0.0.1:3000/api';
-  }
-  
+  if (window.location.port === '5173') return 'http://127.0.0.1:3000/api';
   return '/api';
 };
 
@@ -19,41 +14,27 @@ let API_BASE = getInitialBaseUrl();
 export const api = {
   setBaseUrl(url: string) {
     let cleanUrl = url.trim().replace(/\/$/, '');
-    
     if (cleanUrl === '' || cleanUrl.startsWith('/')) {
         API_BASE = cleanUrl || '/api';
         if (!API_BASE.endsWith('/api')) API_BASE += '/api';
         localStorage.setItem(STORAGE_KEY, API_BASE);
         return;
     }
-
-    if (!cleanUrl.startsWith('http')) {
-        cleanUrl = `http://${cleanUrl}`;
-    }
-
-    if (!cleanUrl.endsWith('/api')) {
-       API_BASE = `${cleanUrl}/api`;
-    } else {
-       API_BASE = cleanUrl;
-    }
-    
+    if (!cleanUrl.startsWith('http')) cleanUrl = `http://${cleanUrl}`;
+    if (!cleanUrl.endsWith('/api')) API_BASE = `${cleanUrl}/api`;
+    else API_BASE = cleanUrl;
     localStorage.setItem(STORAGE_KEY, API_BASE);
   },
 
-  getBaseUrl() {
-    return API_BASE;
-  },
+  getBaseUrl() { return API_BASE; },
 
-  // Auth & Setup
   async checkSetup(): Promise<{ setupRequired: boolean }> {
     try {
         const res = await fetch(`${API_BASE}/auth/check`);
-        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return await res.json();
     } catch (e: any) {
-        if (e.message.includes('Failed to fetch')) {
-            throw new Error(`Failed to fetch from ${API_BASE}. Is the server running?`);
-        }
+        if (e.message.includes('Failed to fetch')) throw new Error(`Failed to fetch from ${API_BASE}`);
         throw e;
     }
   },
@@ -88,20 +69,10 @@ export const api = {
     return await res.json();
   },
 
-  // Data Polling
   async getDevices(): Promise<Device[]> {
     const res = await fetch(`${API_BASE}/devices`);
     if (!res.ok) return [];
     return await res.json();
-  },
-
-  async getServerInfo(): Promise<Device | null> {
-    try {
-        const devices = await this.getDevices();
-        return devices.find(d => d.id.includes('server') || d.name.toLowerCase().includes('server')) || null;
-    } catch {
-        return null;
-    }
   },
 
   async getUsers(): Promise<User[]> {
@@ -127,7 +98,6 @@ export const api = {
       await fetch(`${API_BASE}/invites/${code}`, { method: 'DELETE' });
   },
 
-  // Mails & Notifications
   async getMails(userId: string): Promise<Mail[]> {
     const res = await fetch(`${API_BASE}/mail/${userId}`);
     if (!res.ok) return [];
@@ -174,7 +144,6 @@ export const api = {
       await fetch(`${API_BASE}/notifications/${userId}/clear`, { method: 'DELETE' });
   },
 
-  // System
   async getUpdateStatus(): Promise<UpdateConfig> {
       const res = await fetch(`${API_BASE}/update/check`);
       return await res.json();
@@ -205,6 +174,14 @@ export const api = {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action })
+      });
+  },
+
+  async executeDevicePowerAction(deviceId: string, action: 'reboot' | 'shutdown'): Promise<void> {
+      await fetch(`${API_BASE}/devices/power`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ deviceId, action })
       });
   }
 };
