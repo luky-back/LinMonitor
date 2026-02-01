@@ -69,21 +69,22 @@ const App: React.FC = () => {
 
   useEffect(() => { initSystem(); }, []);
 
+  const fetchTelemetry = async () => {
+      if (!currentUser || connectionError) return;
+      try {
+          const devList = await api.getDevices();
+          setDevices(devList);
+          const serverInstance = devList.find(d => d.id.includes('server') || d.name.toLowerCase().includes('server'));
+          if (serverInstance) setServer(serverInstance);
+          const userList = await api.getUsers();
+          setUsers(userList);
+          if (currentUser.role === 'Owner') setInvites(await api.getInvites());
+          setMails(await api.getMails(currentUser.id));
+          setNotifications(await api.getNotifications(currentUser.id));
+      } catch (e) { console.error("Polling error", e); }
+  };
+
   useEffect(() => {
-    if (!currentUser || connectionError) return;
-    const fetchTelemetry = async () => {
-        try {
-            const devList = await api.getDevices();
-            setDevices(devList);
-            const serverInstance = devList.find(d => d.id.includes('server') || d.name.toLowerCase().includes('server'));
-            if (serverInstance) setServer(serverInstance);
-            const userList = await api.getUsers();
-            setUsers(userList);
-            if (currentUser.role === 'Owner') setInvites(await api.getInvites());
-            setMails(await api.getMails(currentUser.id));
-            setNotifications(await api.getNotifications(currentUser.id));
-        } catch (e) { console.error("Polling error", e); }
-    };
     fetchTelemetry(); 
     const interval = setInterval(fetchTelemetry, refreshRate);
     return () => clearInterval(interval);
@@ -112,31 +113,26 @@ const App: React.FC = () => {
       const files = updateConfig.changedFiles || ['unknown_file'];
       const totalFiles = files.length;
       
-      // Calculate estimated time: 0.5s per file download (simulated) + 15s build + 5s restart
       const estimatedSeconds = (totalFiles * 0.5) + 20;
       setTimeRemaining(estimatedSeconds);
 
-      // Start actual update on server
       api.triggerUpdate();
 
-      // Simulate File Progress
       let completedFiles = 0;
       for (const file of files) {
           setFileProgress(prev => ({ ...prev, [file]: 0 }));
-          // Animate this file to 100%
           for (let i = 0; i <= 100; i += 20) {
               await new Promise(r => setTimeout(r, 50));
               setFileProgress(prev => ({ ...prev, [file]: i }));
           }
           completedFiles++;
-          setTotalProgress((completedFiles / totalFiles) * 50); // Download is 50% of work
+          setTotalProgress((completedFiles / totalFiles) * 50); 
       }
 
       setUpdateStep('building');
-      // Simulate Build Progress (50% to 90%)
       const buildSteps = 100;
       for (let i = 0; i < buildSteps; i++) {
-           await new Promise(r => setTimeout(r, 150)); // 15s total
+           await new Promise(r => setTimeout(r, 150)); 
            setTotalProgress(50 + (i / buildSteps) * 40);
            setTimeRemaining(prev => (prev ? prev - 0.15 : 0));
       }
@@ -148,7 +144,6 @@ const App: React.FC = () => {
       setTotalProgress(100);
       setUpdateStep('done');
       
-      // Attempt to reconnect
       setTimeout(() => window.location.reload(), 2000);
   };
 
@@ -166,35 +161,48 @@ const App: React.FC = () => {
       );
   }
 
-  // Auth Handlers... (kept same as previous logic, abbreviated for space)
   const handleSetupOwner = async (u:string, p:string) => { await api.setupOwner(u, p).then(u => {setCurrentUser(u); localStorage.setItem('pimonitor_user', JSON.stringify(u));}); };
   const handleLogin = async (u:string, p:string) => { await api.login(u, p).then(u => {setCurrentUser(u); localStorage.setItem('pimonitor_user', JSON.stringify(u));}); };
   const handleRegister = async (c:string, u:string, p:string) => { await api.register(c, u, p).then(u => {setCurrentUser(u); localStorage.setItem('pimonitor_user', JSON.stringify(u));}); };
 
+  // --- FEATURE ACTIONS ---
+  const handleUpdateConfigChange = async (url: string, token: string) => {
+      await api.updateSettings({ repoUrl: url, githubToken: token });
+      const status = await api.getUpdateStatus();
+      setUpdateConfig(prev => ({...prev, ...status, repoUrl: url, githubToken: token}));
+  };
+
+  const handleCreateInvite = async (role: any) => {
+      await api.createInvite(role, currentUser!.id);
+      fetchTelemetry(); // Refresh lists immediately
+  };
+
+  const handleDeleteInvite = async (code: string) => {
+      await api.deleteInvite(code);
+      fetchTelemetry();
+  };
+
   if (isLoading) return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-500 gap-4"><RefreshCw size={32} className="animate-spin text-blue-500" /><p className="animate-pulse">Connecting...</p></div>;
-  if (connectionError) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white">Connection Error (See setup)</div>; // Fallback, full UI in previous change
+  if (connectionError) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white">Connection Error (See setup)</div>;
   if (!currentUser) return <Auth mode={authMode as any} language={language} onLogin={handleLogin} onRegister={handleRegister} onSetup={handleSetupOwner} onSwitchMode={(m) => setAuthMode(m)} error={authError} />;
 
   return (
     <Router>
-      <Layout language={language} settings={settings} currentUser={currentUser} notifications={notifications} onLogout={() => {setCurrentUser(null); localStorage.removeItem('pimonitor_user');}} onClearNotification={() => {}} onDeleteNotification={() => {}}>
+      <Layout language={language} settings={settings} currentUser={currentUser} notifications={notifications} onLogout={() => {setCurrentUser(null); localStorage.removeItem('pimonitor_user');}} onClearNotification={api.markNotificationRead} onDeleteNotification={api.deleteNotification}>
         <Routes>
           <Route path="/" element={<Home devices={devices} language={language} settings={settings} />} />
           <Route path="/devices" element={<Devices devices={devices} onRenameDevice={()=>{}} onRenameProcess={()=>{}} onRemoveDevice={()=>{}} onProcessAction={()=>{}} language={language} settings={settings} />} />
-          <Route path="/server" element={server ? <Server server={server} language={language} settings={settings} currentUser={currentUser} onUpdateLimits={()=>{}} updateConfig={updateConfig} onUpdateConfigChange={()=>{}} onTriggerUpdate={() => setShowUpdateModal(true)} /> : <div>No Server</div>} />
+          <Route path="/server" element={server ? <Server server={server} language={language} settings={settings} currentUser={currentUser} onUpdateLimits={()=>{}} updateConfig={updateConfig} onUpdateConfigChange={handleUpdateConfigChange} onTriggerUpdate={() => setShowUpdateModal(true)} /> : <div>No Server</div>} />
           <Route path="/settings" element={<Settings devices={devices} refreshRate={refreshRate} onRefreshRateChange={setRefreshRate} language={language} onLanguageChange={setLanguage} settings={settings} onSettingsChange={setSettings} />} />
-          <Route path="/mail" element={<MailPage currentUser={currentUser} users={users} mails={mails} onSendMail={async (t,s,b) => await api.sendMail(currentUser.id, t,s,b)} language={language} />} />
-          <Route path="/users" element={<UsersPage currentUser={currentUser} users={users} invites={invites} language={language} onCreateInvite={()=>{}} onRequestInvite={()=>{}} onDeleteInvite={()=>{}} />} />
+          <Route path="/mail" element={<MailPage currentUser={currentUser} users={users} mails={mails} onSendMail={async (t,s,b) => { await api.sendMail(currentUser.id, t,s,b); fetchTelemetry(); }} language={language} />} />
+          <Route path="/users" element={<UsersPage currentUser={currentUser} users={users} invites={invites} language={language} onCreateInvite={handleCreateInvite} onRequestInvite={()=>{}} onDeleteInvite={handleDeleteInvite} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
 
-        {/* --- HEAVY UPDATE UI MODAL --- */}
         {showUpdateModal && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
                 <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md"></div>
                 <div className="relative bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-                    
-                    {/* Header */}
                     <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6">
                         <div className="flex justify-between items-start">
                              <div className="flex items-center gap-3">
@@ -236,7 +244,6 @@ const App: React.FC = () => {
                             </>
                         ) : (
                             <div className="space-y-6">
-                                {/* Total Progress */}
                                 <div>
                                     <div className="flex justify-between items-end mb-2">
                                         <h3 className="text-white font-medium flex items-center gap-2">
@@ -253,7 +260,6 @@ const App: React.FC = () => {
                                     <p className="text-right text-xs text-slate-500 mt-1">Time Remaining: {timeRemaining?.toFixed(0)}s</p>
                                 </div>
 
-                                {/* File Details Grid */}
                                 <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto pr-2">
                                     {updateStep === 'downloading' && updateConfig.changedFiles?.map((file, i) => (
                                         <div key={i} className="flex items-center justify-between p-2 rounded bg-slate-800/50">
