@@ -172,7 +172,7 @@ const Layout: React.FC<LayoutProps> = ({
       <main className="flex-1 flex flex-col h-full overflow-hidden relative">
         {/* Header - Hidden in Focus Mode */}
         {!focusMode && (
-            <header className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md">
+            <header className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md relative z-30">
               <div className="lg:hidden flex items-center gap-2">
                 <button 
                   onClick={() => setIsMobileMenuOpen(true)}
@@ -266,7 +266,7 @@ const Layout: React.FC<LayoutProps> = ({
         )}
 
         {/* Scrollable Content Area */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-8 relative">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-8 relative z-0">
           {children}
         </div>
       </main>
