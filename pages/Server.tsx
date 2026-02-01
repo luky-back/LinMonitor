@@ -15,7 +15,8 @@ import {
   Cpu,
   Copy,
   Check,
-  Edit2
+  Edit2,
+  AlertTriangle
 } from 'lucide-react';
 import { Device, AppSettings, User, ResourceLimits, UpdateConfig } from '../types';
 import { translations } from '../translations';
@@ -149,6 +150,13 @@ const Server: React.FC<ServerProps> = ({ server, language, settings, currentUser
                         {updateConfig.status}
                     </div>
                 </div>
+
+                {updateConfig.error && (
+                    <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg flex items-center gap-2 text-rose-400 text-sm">
+                        <AlertTriangle size={16} />
+                        <span>Update Error: {updateConfig.error}</span>
+                    </div>
+                )}
 
                 {/* Repo URL UI */}
                 <div className="mb-6 p-4 bg-slate-950 rounded-lg border border-slate-800">
