@@ -1,14 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Terminal } from 'xterm';
+import { FitAddon } from 'xterm-addon-fit';
 import { 
-  Terminal, 
+  Terminal as TerminalIcon, 
   Cpu, 
   Database, 
   HardDrive, 
   Monitor, 
   ChevronDown, 
-  ChevronUp 
+  ChevronUp,
+  RefreshCw
 } from 'lucide-react';
 import { Device, HardwareSpecs } from '../types';
+import { api } from '../services/api';
 
 export const InfoRow: React.FC<{ label: string; value: string | number }> = ({ label, value }) => (
   <div className="flex justify-between items-center py-2 border-b border-slate-800 last:border-0">
@@ -157,107 +161,122 @@ export const DeviceHardware: React.FC<{ hardware: HardwareSpecs; t: any }> = ({ 
 }
 
 export const DeviceTerminal: React.FC<{ device: Device }> = ({ device }) => {
-  const [history, setHistory] = useState<Array<{ type: 'input' | 'output', content: string }>>([
-    { type: 'output', content: `Connected to ${device.name} (${device.ip})` },
-    { type: 'output', content: `PiMonitor Agent v1.0.3 active` },
-    { type: 'output', content: `Type 'help' for available commands.` }
-  ]);
-  const [commandBuffer, setCommandBuffer] = useState<string[]>([]);
-  const [historyPointer, setHistoryPointer] = useState<number>(-1);
-  const [input, setInput] = useState('');
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<HTMLDivElement>(null);
+  const xtermRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const intervalRef = useRef<any>(null);
+  const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [history]);
+    if (!terminalRef.current) return;
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const cmd = input.trim();
-      if (!cmd) return;
+    // Initialize xterm.js
+    const term = new Terminal({
+      cursorBlink: true,
+      fontSize: 14,
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      theme: {
+        background: '#020617', // Slate 950
+        foreground: '#e2e8f0', // Slate 200
+        cursor: '#10b981', // Emerald 500
+      },
+      convertEol: true, // Handle line endings gracefully
+    });
+    
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(terminalRef.current);
+    fitAddon.fit();
+    
+    xtermRef.current = term;
+    fitAddonRef.current = fitAddon;
 
-      setHistory(prev => [...prev, { type: 'input' as const, content: cmd }]);
-      setCommandBuffer(prev => [...prev, cmd]);
-      setHistoryPointer(-1);
-      setInput('');
+    term.writeln(`\x1b[1;34m[PiMonitor]\x1b[0m Connecting to ${device.name} (${device.ip})...`);
 
-      setTimeout(() => {
-        let output = '';
-        const args = cmd.split(' ');
-        switch(args[0].toLowerCase()) {
-            case 'help': 
-              output = 'Available commands: help, status, ping, clear, restart-agent, top, df'; 
-              break;
-            case 'ping': output = 'pong'; break;
-            case 'clear': setHistory([]); return;
-            case 'status': 
-              output = `CPU: ${device.stats.cpuUsage.toFixed(1)}% | Mem: ${device.stats.memoryUsage.toFixed(1)}% | Temp: ${device.stats.temperature.toFixed(1)}°C`; 
-              break;
-            case 'restart-agent': output = 'Restarting agent service...'; break;
-            case 'ls': output = 'pimonitor_agent.py  requirements.txt  logs/  config.json'; break;
-            case 'whoami': output = 'root'; break;
-            case 'top':
-              output = `PID    USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
-1024   root      20   0   12.1g   250m   120m S   ${(Math.random()*10).toFixed(1)}   2.1   2:04.22 api-server`;
-              break;
-            case 'df':
-               output = `Filesystem     1K-blocks    Used Available Use% Mounted on
-/dev/root       30466688 8455220  20732168  29% /`;
-               break;
-            default: output = `bash: ${cmd}: command not found`;
+    // Handle Resize
+    const handleResize = () => fitAddon.fit();
+    window.addEventListener('resize', handleResize);
+
+    // Initial connection attempt
+    const connect = async () => {
+        try {
+            await fetch(`${api.getBaseUrl()}/terminal/${device.id}/start`, { method: 'POST' });
+            setIsConnected(true);
+            term.writeln(`\x1b[1;32m[PiMonitor]\x1b[0m Connected! Interactive session active.`);
+            term.writeln('');
+        } catch (e) {
+            term.writeln(`\x1b[1;31m[Error]\x1b[0m Failed to start terminal session.`);
         }
-        setHistory(prev => [...prev, { type: 'output' as const, content: output }]);
-      }, 300);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (commandBuffer.length === 0) return;
-      const newPointer = historyPointer + 1;
-      if (newPointer < commandBuffer.length) {
-        setHistoryPointer(newPointer);
-        const cmd = commandBuffer[commandBuffer.length - 1 - newPointer];
-        setInput(cmd);
-      }
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (historyPointer > -1) {
-        const newPointer = historyPointer - 1;
-        setHistoryPointer(newPointer);
-        if (newPointer === -1) {
-          setInput('');
-        } else {
-          const cmd = commandBuffer[commandBuffer.length - 1 - newPointer];
-          setInput(cmd);
+    };
+    connect();
+
+    // Input Handler (Frontend -> Backend)
+    term.onData(async (data) => {
+        if (!isConnected) return;
+        try {
+            await fetch(`${api.getBaseUrl()}/terminal/${device.id}/input`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ data })
+            });
+        } catch (e) {
+            console.error("Failed to send keystroke", e);
         }
+    });
+
+    // Output Polling (Backend -> Frontend)
+    // Using simple short polling for "real-time" feel without WebSockets complexity in this setup
+    intervalRef.current = setInterval(async () => {
+        try {
+            const res = await fetch(`${api.getBaseUrl()}/terminal/${device.id}/output`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.output) {
+                    term.write(data.output);
+                }
+            }
+        } catch (e) {
+            // silent fail on poll
+        }
+    }, 200); // 200ms poll
+
+    return () => {
+        window.removeEventListener('resize', handleResize);
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        term.dispose();
+    };
+  }, [device.id]);
+
+  const restartSession = async () => {
+      if (xtermRef.current) {
+          xtermRef.current.reset();
+          xtermRef.current.writeln(`\x1b[1;33m[PiMonitor]\x1b[0m Restarting session...`);
+          try {
+            await fetch(`${api.getBaseUrl()}/terminal/${device.id}/start`, { method: 'POST' });
+            xtermRef.current.writeln(`\x1b[1;32m[PiMonitor]\x1b[0m Session reset.`);
+          } catch (e) {
+            xtermRef.current.writeln(`\x1b[1;31m[Error]\x1b[0m Failed to restart.`);
+          }
       }
-    }
   };
 
   return (
-    <div className="bg-black rounded-xl border border-slate-800 overflow-hidden flex flex-col h-[500px] font-mono text-sm shadow-2xl">
-        <div className="bg-slate-900/50 p-3 border-b border-slate-800 flex items-center gap-2">
-            <Terminal size={14} className="text-emerald-500" />
-            <span className="text-slate-400">root@{device.ip}:~</span>
+    <div className="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden flex flex-col h-[500px] shadow-2xl relative group">
+        <div className="bg-slate-900/50 p-3 border-b border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+                <TerminalIcon size={14} className="text-emerald-500" />
+                <span className="text-slate-400 font-mono text-sm">ssh://{device.name}</span>
+            </div>
+            <button 
+                onClick={restartSession}
+                className="p-1 hover:bg-slate-800 rounded text-slate-500 hover:text-white transition-colors" 
+                title="Restart Session"
+            >
+                <RefreshCw size={14} />
+            </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
-            {history.map((entry, i) => (
-                <div key={i} className={`${entry.type === 'input' ? 'text-white font-bold' : 'text-slate-300'} whitespace-pre-wrap`}>
-                    {entry.type === 'input' && <span className="text-emerald-500 mr-2">$</span>}
-                    {entry.content}
-                </div>
-            ))}
-            <div ref={bottomRef} />
-        </div>
-        <div className="p-3 bg-slate-900/30 border-t border-slate-800 flex items-center gap-2">
-             <span className="text-emerald-500 font-bold">$</span>
-             <input 
-               autoFocus
-               className="bg-transparent border-none outline-none text-white w-full placeholder-slate-600"
-               value={input}
-               onChange={(e) => setInput(e.target.value)}
-               onKeyDown={handleKeyDown}
-               placeholder="Enter command..."
-             />
+        <div className="flex-1 relative bg-[#020617] p-2">
+            <div ref={terminalRef} className="absolute inset-0" />
         </div>
     </div>
   );
