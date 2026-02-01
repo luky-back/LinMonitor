@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Mail as MailIcon, Send, Search, Plus, Trash2, Reply, ChevronDown, User as UserIcon } from 'lucide-react';
+import { Mail as MailIcon, Send, Search, Plus, Trash2, Reply, ChevronDown, CheckCheck } from 'lucide-react';
 import { Mail, User } from '../types';
 import { translations } from '../translations';
+import { api } from '../services/api';
 
 interface MailPageProps {
   currentUser: User;
@@ -15,10 +16,7 @@ interface MailPageProps {
 const MailPage: React.FC<MailPageProps> = ({ currentUser, users, mails, onSendMail, language }) => {
   const t = translations[language] || translations['en'];
   const [searchParams, setSearchParams] = useSearchParams();
-  
-  // View State managed by URL
   const view = searchParams.get('view') === 'compose' ? 'compose' : 'inbox';
-  
   const [selectedMailId, setSelectedMailId] = useState<string | null>(null);
   
   // Compose State
@@ -26,13 +24,12 @@ const MailPage: React.FC<MailPageProps> = ({ currentUser, users, mails, onSendMa
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
-  
   const suggestionRef = useRef<HTMLDivElement>(null);
 
   const selectedMail = mails.find(m => m.id === selectedMailId) || null;
   const myMails = mails.filter(m => m.toId === currentUser.id).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-  // Close suggestions on click outside
+  // Close suggestions
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (suggestionRef.current && !suggestionRef.current.contains(event.target as Node)) {
@@ -61,16 +58,24 @@ const MailPage: React.FC<MailPageProps> = ({ currentUser, users, mails, onSendMa
     }
   };
 
-  const getSenderName = (id: string) => users.find(u => u.id === id)?.username || "Unknown";
+  const handleDelete = async (id: string) => {
+      await api.deleteMail(id);
+      if (selectedMailId === id) setSelectedMailId(null);
+      // Trigger reload or state update in parent ideally, but force update for now via window or assumption of polling
+  };
 
-  const filteredUsers = users
-    .filter(u => u.id !== currentUser.id && u.username.toLowerCase().includes(toUser.toLowerCase()));
+  const handleMarkAllRead = async () => {
+      await api.markAllMailsRead(currentUser.id);
+  };
+
+  const getSenderName = (id: string) => users.find(u => u.id === id)?.username || "Unknown";
+  const filteredUsers = users.filter(u => u.id !== currentUser.id && u.username.toLowerCase().includes(toUser.toLowerCase()));
 
   return (
     <div className="h-[calc(100vh-8rem)] flex gap-6">
       {/* Sidebar List */}
       <div className="w-80 bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden shrink-0">
-         <div className="p-4 border-b border-slate-800">
+         <div className="p-4 border-b border-slate-800 space-y-3">
             <button 
               onClick={() => { setView('compose'); setSelectedMailId(null); }}
               className={`w-full py-2 rounded-lg flex items-center justify-center gap-2 font-medium transition-colors ${
@@ -78,6 +83,12 @@ const MailPage: React.FC<MailPageProps> = ({ currentUser, users, mails, onSendMa
               }`}
             >
                <Plus size={18} /> {t.compose}
+            </button>
+            <button 
+                onClick={handleMarkAllRead}
+                className="w-full py-1.5 rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 text-xs flex items-center justify-center gap-2 transition-colors"
+            >
+                <CheckCheck size={14} /> Mark all read
             </button>
          </div>
          <div className="flex-1 overflow-y-auto">
@@ -88,14 +99,22 @@ const MailPage: React.FC<MailPageProps> = ({ currentUser, users, mails, onSendMa
                   <div 
                     key={mail.id} 
                     onClick={() => { setSelectedMailId(mail.id); setView('inbox'); }}
-                    className={`p-4 border-b border-slate-800 cursor-pointer hover:bg-slate-800 transition-colors ${selectedMailId === mail.id && view === 'inbox' ? 'bg-slate-800 border-l-2 border-l-blue-500' : ''}`}
+                    className={`p-4 border-b border-slate-800 cursor-pointer hover:bg-slate-800 transition-colors group relative ${selectedMailId === mail.id && view === 'inbox' ? 'bg-slate-800 border-l-2 border-l-blue-500' : ''}`}
                   >
                      <div className="flex justify-between mb-1">
                         <span className={`text-sm font-medium ${!mail.read ? 'text-white' : 'text-slate-300'}`}>{getSenderName(mail.fromId)}</span>
                         <span className="text-xs text-slate-500">{new Date(mail.timestamp).toLocaleDateString()}</span>
                      </div>
                      <div className={`text-sm mb-1 ${!mail.read ? 'text-white font-medium' : 'text-slate-400'}`}>{mail.subject}</div>
-                     <div className="text-xs text-slate-500 truncate">{mail.body}</div>
+                     <div className="text-xs text-slate-500 truncate pr-6">{mail.body}</div>
+                     
+                     <button 
+                        onClick={(e) => { e.stopPropagation(); handleDelete(mail.id); }}
+                        className="absolute right-2 bottom-2 p-1.5 text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all bg-slate-900/80 rounded"
+                        title="Delete"
+                     >
+                         <Trash2 size={14} />
+                     </button>
                   </div>
                ))
             )}
@@ -124,8 +143,6 @@ const MailPage: React.FC<MailPageProps> = ({ currentUser, users, mails, onSendMa
                            autoComplete="off"
                         />
                         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                        
-                        {/* Dropdown Indicator */}
                         <div 
                             className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-slate-500 hover:text-white"
                             onClick={() => setShowSuggestions(!showSuggestions)}
@@ -133,8 +150,6 @@ const MailPage: React.FC<MailPageProps> = ({ currentUser, users, mails, onSendMa
                             <ChevronDown size={16} />
                         </div>
                      </div>
-
-                     {/* Autocomplete Dropdown */}
                      {showSuggestions && (
                         <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 max-h-60 overflow-y-auto">
                            {filteredUsers.length > 0 ? (
@@ -187,7 +202,12 @@ const MailPage: React.FC<MailPageProps> = ({ currentUser, users, mails, onSendMa
          ) : selectedMail ? (
             <div className="flex-1 flex flex-col animate-in fade-in duration-200">
                <div className="p-6 border-b border-slate-800">
-                  <h2 className="text-2xl font-bold text-white mb-4">{selectedMail.subject}</h2>
+                  <div className="flex justify-between items-start mb-4">
+                      <h2 className="text-2xl font-bold text-white">{selectedMail.subject}</h2>
+                      <button onClick={() => handleDelete(selectedMail.id)} className="text-slate-500 hover:text-rose-500 transition-colors" title="Delete Email">
+                          <Trash2 size={20} />
+                      </button>
+                  </div>
                   <div className="flex justify-between items-center">
                      <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-slate-300 font-bold text-lg border border-slate-600">
@@ -201,7 +221,7 @@ const MailPage: React.FC<MailPageProps> = ({ currentUser, users, mails, onSendMa
                      <span className="text-sm text-slate-500">{new Date(selectedMail.timestamp).toLocaleString()}</span>
                   </div>
                </div>
-               <div className="flex-1 p-6 text-slate-300 whitespace-pre-wrap leading-relaxed overflow-y-auto">
+               <div className="flex-1 p-6 text-slate-300 whitespace-pre-wrap leading-relaxed overflow-y-auto font-sans text-base">
                   {selectedMail.body}
                </div>
                <div className="p-4 border-t border-slate-800 bg-slate-900/50 flex gap-2">
